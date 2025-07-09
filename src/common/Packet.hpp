@@ -30,7 +30,7 @@ struct Packet {
     }
 
     // Десериализация из байтов: data без size (только [opcode][payload])
-    Packet deserialize(const std::vector<uint8_t>& data) {
+    static Packet deserialize(const std::vector<uint8_t>& data) {
         if (data.empty()) {
             throw std::runtime_error("Empty packet");
         }
