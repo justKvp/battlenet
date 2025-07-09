@@ -15,7 +15,7 @@ void ClientSession::read_header() {
     header_buffer_.resize(2);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                            [this, self](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
                                     if (ec == boost::asio::error::eof) {
                                         std::cout << "[Server] Client closed the connection\n";
@@ -25,7 +25,6 @@ void ClientSession::read_header() {
                                     close();
                                     return;
                                 }
-
                                 uint16_t body_size = (header_buffer_[0] << 8) | header_buffer_[1];
                                 read_body(body_size);
                             });
@@ -35,7 +34,7 @@ void ClientSession::read_body(std::size_t size) {
     body_buffer_.resize(size);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                            [this, self](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
                                     if (ec == boost::asio::error::eof) {
                                         std::cout << "[Server] Client closed the connection\n";
@@ -53,7 +52,7 @@ void ClientSession::read_body(std::size_t size) {
                                     std::cerr << "[Server] Failed to deserialize packet: " << ex.what() << "\n";
                                 }
 
-                                read_header();
+                                read_header(); // продолжаем слушать
                             });
 }
 
@@ -113,15 +112,14 @@ void ClientSession::do_write() {
     writing_ = true;
     auto self = shared_from_this();
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
-                             [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                             [this, self](boost::system::error_code ec, std::size_t) {
                                  if (ec) {
                                      std::cerr << "[Server] Write failed: " << ec.message() << "\n";
                                      close();
                                      return;
                                  }
-
                                  write_queue_.pop_front();
-                                 do_write();
+                                 do_write(); // Пишем следующий, если есть
                              });
 }
 
