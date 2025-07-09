@@ -1,109 +1,63 @@
-// byte_buffer.h
-#pragma once
+#ifndef BYTE_BUFFER_H
+#define BYTE_BUFFER_H
 
 #include <vector>
-#include <cstring>    // Для memcpy
-#include <stdexcept>  // Для исключений
-#include <type_traits>// Для static_assert
-#include <string>
-#include <cstdint>    // Для uint8_t, uint16_t и т.д.
+#include <cstdint>
+#include <cstring>
 
 class ByteBuffer {
 public:
     // Конструкторы
-    ByteBuffer() : _rpos(0), _wpos(0) {}
-    ByteBuffer(const uint8_t* data, size_t size) : _rpos(0), _wpos(0) {
-        Append(data, size);
+    explicit ByteBuffer(size_t size = 1024) : buffer_(size), position_(0) {}
+
+    ByteBuffer(const ByteBuffer&) = default;
+    ByteBuffer& operator=(const ByteBuffer&) = default;
+
+    // Основные методы
+    void WriteInt32(int32_t value) {
+        EnsureSpace(sizeof(value));
+        std::memcpy(buffer_.data() + position_, &value, sizeof(value));
+        position_ += sizeof(value);
     }
 
-    // Методы записи
-    void Append(const uint8_t* data, size_t size) {
-        if (size) {
-            _storage.insert(_storage.end(), data, data + size);
-            _wpos += size;
+    void WriteString(const std::string& str) {
+        WriteInt32(static_cast<int32_t>(str.size()));
+        EnsureSpace(str.size());
+        std::memcpy(buffer_.data() + position_, str.data(), str.size());
+        position_ += str.size();
+    }
+
+    int32_t ReadInt32() {
+        int32_t value;
+        std::memcpy(&value, buffer_.data() + position_, sizeof(value));
+        position_ += sizeof(value);
+        return value; // Должен возвращать то же значение, что было записано
+    }
+
+    std::string ReadString() {
+        int32_t length = ReadInt32();
+        std::string str(buffer_.data() + position_, length);
+        position_ += length;
+        return str;
+    }
+
+    // Доступ к данным
+    const char* Data() const { return buffer_.data(); }
+    char* Data() { return buffer_.data(); }
+    size_t Size() const { return position_; }
+    size_t Capacity() const { return buffer_.size(); }
+    void SetSize(size_t size) { position_ = size; }
+    void Clear() { position_ = 0; }
+
+private:
+    void EnsureSpace(size_t needed) {
+        if (position_ + needed > buffer_.size()) {
+            buffer_.resize(position_ + needed);
         }
     }
 
-    template<typename T>
-    ByteBuffer& operator<<(T value) {
-        static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "ByteBuffer::operator<< can only write fundamental or enum types");
-
-        size_t pos = _storage.size();
-        _storage.resize(pos + sizeof(T));
-        std::memcpy(&_storage[pos], &value, sizeof(T));
-        _wpos += sizeof(T);
-        return *this;
-    }
-
-    ByteBuffer& operator<<(const std::string& value) {
-        uint16_t length = static_cast<uint16_t>(value.size());
-        *this << length;
-
-        size_t pos = _storage.size();
-        _storage.resize(pos + length);
-        std::memcpy(&_storage[pos], value.data(), length);
-        _wpos += length;
-        return *this;
-    }
-
-    // Методы чтения
-    template<typename T>
-    ByteBuffer& operator>>(T& value) {
-        static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "ByteBuffer::operator>> can only read fundamental or enum types");
-
-        if (!CanRead<T>())
-            throw std::out_of_range("ByteBuffer: read out of range");
-
-        value = *reinterpret_cast<T*>(&_storage[_rpos]);
-        _rpos += sizeof(T);
-        return *this;
-    }
-
-    ByteBuffer& operator>>(std::string& value) {
-        uint16_t length = 0;
-        *this >> length;
-
-        if (!CanRead(length))
-            throw std::out_of_range("ByteBuffer: string read out of range");
-
-        value.assign(reinterpret_cast<const char*>(&_storage[_rpos]), length);
-        _rpos += length;
-        return *this;
-    }
-
-    // Утилиты
-    const uint8_t* GetData() const { return _storage.data(); }
-    size_t GetSize() const { return _storage.size(); }
-    const uint8_t* GetReadPointer() const { return &_storage[_rpos]; }
-    size_t GetActiveSize() const { return _storage.size() - _rpos; }
-    void Clear() { _storage.clear(); _rpos = 0; _wpos = 0; }
-
-    void SkipRead(size_t bytes) {
-        if (_rpos + bytes > _storage.size())
-            throw std::out_of_range("ByteBuffer: skip out of range");
-        _rpos += bytes;
-    }
-
-    // Состояние
-    bool Empty() const { return _storage.empty(); }
-    size_t GetReadPos() const { return _rpos; }
-    size_t GetWritePos() const { return _wpos; }
-
-private:
-    // Внутренние проверки
-    template<typename T>
-    bool CanRead() const {
-        return sizeof(T) <= (_storage.size() - _rpos);
-    }
-
-    bool CanRead(size_t bytes) const {
-        return bytes <= (_storage.size() - _rpos);
-    }
-
-    // Хранилище данных
-    std::vector<uint8_t> _storage;
-    size_t _rpos = 0; // Позиция чтения
-    size_t _wpos = 0; // Позиция записи
+    std::vector<char> buffer_;
+    size_t position_;
 };
+
+#endif // BYTE_BUFFER_H
