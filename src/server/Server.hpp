@@ -12,6 +12,7 @@ class Server : public std::enable_shared_from_this<Server> {
 public:
     Server(boost::asio::io_context& io_context, int port);
     void remove_session(std::shared_ptr<ClientSession> session);
+    void log_session_count();
 
 private:
     void start_accept();

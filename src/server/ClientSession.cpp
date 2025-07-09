@@ -26,8 +26,8 @@ void ClientSession::read_header() {
                                     return;
                                 }
 
-                                uint16_t size = (header_buffer_[0] << 8) | header_buffer_[1];
-                                read_body(size);
+                                uint16_t body_size = (header_buffer_[0] << 8) | header_buffer_[1];
+                                read_body(body_size);
                             });
 }
 
@@ -49,8 +49,8 @@ void ClientSession::read_body(std::size_t size) {
                                 try {
                                     Packet packet = Packet::deserialize(body_buffer_);
                                     handle_packet(packet);
-                                } catch (...) {
-                                    std::cerr << "[Server] Failed to deserialize packet\n";
+                                } catch (const std::exception& ex) {
+                                    std::cerr << "[Server] Failed to deserialize packet: " << ex.what() << "\n";
                                 }
 
                                 read_header();
@@ -78,14 +78,38 @@ void ClientSession::handle_packet(Packet& packet) {
 }
 
 void ClientSession::send_packet(const Packet& packet) {
-    std::vector<uint8_t> data = packet.serialize();
+    std::vector<uint8_t> body = packet.serialize();
+
+    ByteBuffer header;
+    header.write_uint16(static_cast<uint16_t>(body.size()));
+
+    std::vector<uint8_t> full_packet = header.data();
+    full_packet.insert(full_packet.end(), body.begin(), body.end());
+
+    write_queue_.push_back(std::move(full_packet));
+    if (!writing_) {
+        do_write();
+    }
+}
+
+void ClientSession::do_write() {
+    if (write_queue_.empty()) {
+        writing_ = false;
+        return;
+    }
+
+    writing_ = true;
     auto self = shared_from_this();
-    boost::asio::async_write(socket_, boost::asio::buffer(data),
+    boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t /*length*/) {
                                  if (ec) {
                                      std::cerr << "[Server] Write failed: " << ec.message() << "\n";
                                      close();
+                                     return;
                                  }
+
+                                 write_queue_.pop_front();
+                                 do_write();
                              });
 }
 

@@ -60,19 +60,25 @@ void Client::send_message(const std::string &msg) {
     send_packet(p);
 }
 
-void Client::send_packet(const Packet &packet) {
-    std::vector<uint8_t> data = packet.serialize();
+void Client::send_packet(const Packet& packet) {
+    std::vector<uint8_t> body = packet.serialize();
+
+    ByteBuffer header;
+    header.write_uint16(static_cast<uint16_t>(body.size()));
+
+    std::vector<uint8_t> full_packet = header.data();
+    full_packet.insert(full_packet.end(), body.begin(), body.end());
 
     if (!connected) {
         std::cout << "[Client] Not connected. Queuing packet.\n";
-        outgoing_queue.push(data);
+        outgoing_queue.push(full_packet);
         return;
     }
 
-    bool writing = !outgoing_queue.empty();
-    outgoing_queue.push(data);
+    outgoing_queue.push(full_packet);
 
-    if (!writing) {
+    // 👉 ВСЕГДА запускаем отправку, если пишем только этот пакет
+    if (outgoing_queue.size() == 1) {
         flush_queue();
     }
 }
@@ -107,14 +113,20 @@ void Client::start_receive_loop() {
                                     return;
                                 }
 
-                                uint16_t size = ((*header)[0] << 8) | (*header)[1];
-                                auto body = std::make_shared<std::vector<uint8_t>>(size);
+                                uint16_t body_size = ((*header)[0] << 8) | (*header)[1];
+                                if (body_size == 0) {
+                                    std::cerr << "[Client] Invalid body size (0), closing.\n";
+                                    connected = false;
+                                    schedule_reconnect();
+                                    return;
+                                }
+
+                                auto body = std::make_shared<std::vector<uint8_t>>(body_size);
 
                                 boost::asio::async_read(socket, boost::asio::buffer(*body),
                                                         [this, body](boost::system::error_code ec2, std::size_t) {
                                                             if (ec2) {
-                                                                std::cerr << "[Client] Read body failed: "
-                                                                          << ec2.message() << "\n";
+                                                                std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
                                                                 connected = false;
                                                                 schedule_reconnect();
                                                                 return;
@@ -123,14 +135,15 @@ void Client::start_receive_loop() {
                                                             try {
                                                                 Packet p = Packet::deserialize(*body);
                                                                 handle_packet(p);
-                                                            } catch (...) {
-                                                                std::cerr << "[Client] Failed to parse packet\n";
+                                                            } catch (const std::exception& ex) {
+                                                                std::cerr << "[Client] Failed to parse packet: " << ex.what() << "\n";
                                                             }
 
-                                                            start_receive_loop(); // loop again
+                                                            start_receive_loop(); // продолжить чтение
                                                         });
                             });
 }
+
 
 void Client::handle_packet(const Packet &p) {
     switch (p.opcode) {

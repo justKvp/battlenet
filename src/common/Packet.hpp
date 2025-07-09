@@ -1,4 +1,7 @@
+#pragma once
+
 #include <iostream>
+#include <vector>
 #include "opcodes.hpp"
 #include "ByteBuffer.hpp"
 
@@ -6,48 +9,27 @@ struct Packet {
     Opcode opcode;
     ByteBuffer buffer;
 
-    // Сериализация в байты: [size_hi][size_lo][opcode][payload]
     std::vector<uint8_t> serialize() const {
-        std::vector<uint8_t> result;
-
-        // 1) Сначала пишем opcode (1 байт)
-        result.push_back(static_cast<uint8_t>(opcode));
-
-        // 2) Потом все данные ByteBuffer
-        const auto &payload = buffer.data();
-        result.insert(result.end(), payload.begin(), payload.end());
-
-        // 3) Длина пакета = opcode + payload
-        uint16_t size = result.size();
-
-        // 4) Полный пакет = [size_hi][size_lo][opcode][payload]
-        std::vector<uint8_t> full_packet;
-        full_packet.push_back((size >> 8) & 0xFF);
-        full_packet.push_back(size & 0xFF);
-        full_packet.insert(full_packet.end(), result.begin(), result.end());
-
-        return full_packet;
+        ByteBuffer buffer_out;
+        buffer_out.write_uint16(static_cast<uint16_t>(opcode));
+        const auto& payload = buffer.data();
+        buffer_out.data().insert(buffer_out.data().end(), payload.begin(), payload.end());
+        return buffer_out.data();
     }
 
-    // Десериализация из байтов: data без size (только [opcode][payload])
-    static Packet deserialize(const std::vector<uint8_t> &data) {
-        if (data.empty()) {
-            throw std::runtime_error("Empty packet");
+    static Packet deserialize(const std::vector<uint8_t>& data) {
+        if (data.size() < 2) {
+            throw std::runtime_error("Packet too short to contain opcode");
         }
 
-        Packet packet;
+        ByteBuffer buffer(data);
+        Packet pkt;
+        pkt.opcode = static_cast<Opcode>(buffer.read_uint16());
 
-        // Первый байт — это opcode
-        packet.opcode = static_cast<Opcode>(data[0]);
+        if (data.size() > 2) {
+            pkt.buffer = ByteBuffer(std::vector<uint8_t>(data.begin() + 2, data.end()));
+        }
 
-        // Остальное — payload
-        std::vector<uint8_t> payload(data.begin() + 1, data.end());
-        packet.buffer = ByteBuffer(payload);
-
-        // DEBUG:
-        //std::cout << "[Packet] Deserialized opcode: " << static_cast<int>(packet.opcode)
-        //          << ", payload size: " << payload.size() << "\n";
-
-        return packet;
+        return pkt;
     }
 };

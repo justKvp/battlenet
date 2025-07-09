@@ -10,23 +10,31 @@ Server::Server(boost::asio::io_context& io_context, int port)
 }
 
 void Server::start_accept() {
-    auto socket = std::make_shared<tcp::socket>(io_context_);
-    acceptor_.async_accept(*socket, [this, socket](boost::system::error_code ec) {
+    acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
         if (!ec) {
-            auto session = std::make_shared<ClientSession>(std::move(*socket), shared_from_this());
+            auto session = std::make_shared<ClientSession>(std::move(socket), shared_from_this());
             {
                 std::lock_guard<std::mutex> lock(sessions_mutex_);
                 sessions_.insert(session);
             }
+            std::cout << "[Server] New client connected.\n";
+            log_session_count();
             session->start();
-        } else {
-            std::cerr << "[Server] Accept error: " << ec.message() << "\n";
         }
         start_accept();
     });
 }
 
 void Server::remove_session(std::shared_ptr<ClientSession> session) {
+    {
+        std::lock_guard<std::mutex> lock(sessions_mutex_);
+        sessions_.erase(session);
+    }
+    std::cout << "[Server] Client disconnected.\n";
+    log_session_count();
+}
+
+void Server::log_session_count() {
     std::lock_guard<std::mutex> lock(sessions_mutex_);
-    sessions_.erase(session);
+    std::cout << "[Server] Active sessions: " << sessions_.size() << "\n";
 }
