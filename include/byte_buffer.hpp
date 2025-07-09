@@ -9,13 +9,20 @@
 class ByteBuffer {
     std::vector<uint8_t> buffer_;
     mutable size_t read_pos_ = 0;
+    static constexpr size_t MAX_SIZE = 1024 * 1024; // 1 MB
 
 public:
     ByteBuffer() = default;
-    explicit ByteBuffer(size_t size) : buffer_(size) {}
+    explicit ByteBuffer(size_t size) : buffer_(size) {
+        if (size > MAX_SIZE) {
+            throw std::runtime_error("Buffer size exceeds 1 MB limit");
+        }
+    }
 
-    // Запись данных
     void write(const void* data, size_t size) {
+        if (buffer_.size() + size > MAX_SIZE) {
+            throw std::runtime_error("Buffer would exceed 1 MB limit");
+        }
         const auto* bytes = static_cast<const uint8_t*>(data);
         buffer_.insert(buffer_.end(), bytes, bytes + size);
     }
@@ -27,7 +34,6 @@ public:
         write(&value, sizeof(T));
     }
 
-    // Чтение данных
     void read(void* dest, size_t size) const {
         if (read_pos_ + size > buffer_.size()) {
             throw std::out_of_range("ByteBuffer read out of range");
@@ -45,8 +51,10 @@ public:
         return value;
     }
 
-    // Строковые операции
     void write_string(const std::string& str) {
+        if (str.size() > MAX_SIZE - sizeof(uint32_t)) {
+            throw std::runtime_error("String size exceeds 1 MB limit");
+        }
         uint32_t length = static_cast<uint32_t>(str.size());
         write(length);
         write(str.data(), length);
@@ -54,15 +62,14 @@ public:
 
     std::string read_string() const {
         uint32_t length = read<uint32_t>();
-        if (length > 1024*1024) {
-            throw std::runtime_error("String size too large");
+        if (length > MAX_SIZE - sizeof(uint32_t)) {
+            throw std::runtime_error("String size exceeds 1 MB limit");
         }
         std::string result(length, '\0');
         read(&result[0], length);
         return result;
     }
 
-    // Управление буфером
     void clear() {
         buffer_.clear();
         read_pos_ = 0;
@@ -72,11 +79,5 @@ public:
     size_t size() const { return buffer_.size(); }
     size_t remaining() const { return buffer_.size() - read_pos_; }
     void rewind() const { read_pos_ = 0; }
-
-    // Добавленные предложения:
-    void append(const ByteBuffer& other) {
-        buffer_.insert(buffer_.end(), other.buffer_.begin(), other.buffer_.end());
-    }
-
     bool empty() const { return buffer_.empty(); }
 };

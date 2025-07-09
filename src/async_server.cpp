@@ -51,32 +51,34 @@ void ServerConnection::do_read_header() {
     auto buffer = std::make_shared<std::array<uint8_t, 6>>();
 
     auto self = shared_from_this();
-    boost::asio::async_read(socket_,
-                            boost::asio::buffer(*buffer),
-                            [this, self, buffer](boost::system::error_code ec, size_t bytes) {
-                                if (ec) {
-                                    if (ec != boost::asio::error::operation_aborted) {
-                                        std::cerr << "Header read error: " << ec.message() << "\n";
-                                    }
-                                    close();
-                                    return;
-                                }
+    boost::asio::async_read(
+            socket_,
+            boost::asio::buffer(*buffer),
+            [this, self, buffer](boost::system::error_code ec, size_t bytes) {
+                if (ec) {
+                    if (ec != boost::asio::error::operation_aborted) {
+                        std::cerr << "Header read error: " << ec.message() << "\n";
+                    }
+                    close();
+                    return;
+                }
 
-                                try {
-                                    uint16_t opcode = *reinterpret_cast<uint16_t*>(buffer->data());
-                                    uint32_t body_size = *reinterpret_cast<uint32_t*>(buffer->data() + 2);
+                try {
+                    uint16_t opcode = *reinterpret_cast<uint16_t*>(buffer->data());
+                    uint32_t body_size = *reinterpret_cast<uint32_t*>(buffer->data() + 2);
 
-                                    if (body_size > 10*1024*1024) {
-                                        throw std::runtime_error("Packet too large");
-                                    }
+                    // Исправленная проверка (1 MB вместо 10 MB)
+                    if (body_size > 1024 * 1024) {
+                        throw std::runtime_error("Packet size exceeds 1 MB limit");
+                    }
 
-                                    reset_timeout();
-                                    do_read_body(opcode, body_size);
-                                } catch (const std::exception& e) {
-                                    std::cerr << "Header error: " << e.what() << "\n";
-                                    close(true);
-                                }
-                            });
+                    reset_timeout();
+                    do_read_body(opcode, body_size);
+                } catch (const std::exception& e) {
+                    std::cerr << "Header error: " << e.what() << "\n";
+                    close(true);
+                }
+            });
 }
 
 void ServerConnection::do_read_body(uint16_t opcode, uint32_t body_size) {

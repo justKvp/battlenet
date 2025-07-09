@@ -122,11 +122,9 @@ void AsyncClient::do_read_header() {
                     uint16_t opcode = *reinterpret_cast<uint16_t*>(buffer->data());
                     uint32_t body_size = *reinterpret_cast<uint32_t*>(buffer->data() + 2);
 
-                    std::cout << "[CLIENT] Received header (opcode: " << opcode
-                              << ", body size: " << body_size << " bytes)\n";
-
-                    if (body_size > 10*1024*1024) {
-                        throw std::runtime_error("Packet too large");
+                    // Исправленная проверка (1 MB вместо 10 MB)
+                    if (body_size > 1024 * 1024) {
+                        throw std::runtime_error("Packet size exceeds 1 MB limit");
                     }
 
                     reset_timeout();
