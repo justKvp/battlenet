@@ -70,6 +70,13 @@ public:
         return result;
     }
 
+    void append(const ByteBuffer& other) {
+        if (buffer_.size() + other.buffer_.size() > MAX_SIZE) {
+            throw std::runtime_error("Append would exceed 1 MB limit");
+        }
+        buffer_.insert(buffer_.end(), other.buffer_.begin(), other.buffer_.end());
+    }
+
     void clear() {
         buffer_.clear();
         read_pos_ = 0;

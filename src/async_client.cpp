@@ -70,10 +70,13 @@ void AsyncClient::do_write() {
     auto [opcode, body] = write_queue_.front();
     write_queue_.pop();
 
+    ByteBuffer header;
+    header.write<uint16_t>(static_cast<uint16_t>(opcode));
+    header.write<uint32_t>(static_cast<uint32_t>(body.size()));
+
     ByteBuffer packet;
-    packet.write<uint16_t>(static_cast<uint16_t>(opcode));
-    packet.write<uint32_t>(static_cast<uint32_t>(body.size()));
-    packet.append(body);
+    packet.append(header);  // Сначала добавляем заголовок
+    packet.append(body);    // Затем добавляем тело
 
     auto self = shared_from_this();
     boost::asio::async_write(
