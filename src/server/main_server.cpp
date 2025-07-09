@@ -5,9 +5,14 @@
 int main() {
     try {
         boost::asio::io_context io_context;
-        Server server(io_context, 12345);
+
+        int port = 12345; // Порт, на котором будет слушать сервер
+        auto server = std::make_shared<Server>(io_context, port);
+
+        std::cout << "[Server] Running on port " << port << std::endl;
+
         io_context.run();
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         std::cerr << "[Server] Exception: " << e.what() << std::endl;
     }
 
