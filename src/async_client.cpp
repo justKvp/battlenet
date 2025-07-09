@@ -1,29 +1,17 @@
 #include "async_client.hpp"
 #include <iostream>
-#include <iomanip>
 
 void AsyncClient::connect(const std::string& host, const std::string& port) {
     std::cout << "[CLIENT] Connecting to " << host << ":" << port << "...\n";
 
     tcp::resolver resolver(socket_.get_executor());
-    boost::system::error_code resolve_ec;
-    auto endpoints = resolver.resolve(host, port, resolve_ec);
-
-    if (resolve_ec) {
-        std::cerr << "[CLIENT] Resolve failed: " << resolve_ec.message() << "\n";
-        return;
-    }
-
-    if (endpoints.empty()) {
-        std::cerr << "[CLIENT] No endpoints available\n";
-        return;
-    }
+    auto endpoints = resolver.resolve(host, port);
 
     connect_timer_.expires_after(std::chrono::seconds(10));
     connect_timer_.async_wait([this](auto ec) {
-        if (!ec) {
+        if (!ec && !is_connected_) {
             std::cerr << "[CLIENT] Connection timeout\n";
-            socket_.close();
+            close();
         }
     });
 
@@ -40,6 +28,7 @@ void AsyncClient::do_connect(const tcp::endpoint& endpoint) {
             return;
         }
 
+        is_connected_ = true;
         std::cout << "[CLIENT] Connected to "
                   << socket_.remote_endpoint().address().to_string() << ":"
                   << socket_.remote_endpoint().port() << "\n";
@@ -47,10 +36,22 @@ void AsyncClient::do_connect(const tcp::endpoint& endpoint) {
         socket_.set_option(tcp::no_delay(true));
         reset_timeout();
         do_read_header();
+
+        // Теперь можно отправлять данные из очереди
+        if (!write_queue_.empty()) {
+            do_write();
+        }
     });
 }
 
 void AsyncClient::send(Opcode opcode, const ByteBuffer& body) {
+    if (!is_connected_) {
+        std::cout << "[CLIENT] Queuing packet (opcode: " << static_cast<int>(opcode)
+                  << ") while connecting\n";
+        write_queue_.emplace(opcode, body);
+        return;
+    }
+
     std::cout << "[CLIENT] Sending packet (opcode: " << static_cast<int>(opcode)
               << ", size: " << body.size() << " bytes)\n";
 
@@ -61,37 +62,44 @@ void AsyncClient::send(Opcode opcode, const ByteBuffer& body) {
 }
 
 void AsyncClient::do_write() {
+    // Проверяем очередь
     if (write_queue_.empty()) {
         is_writing_ = false;
         return;
     }
 
+    // Берем первый пакет из очереди
     is_writing_ = true;
-    auto [opcode, body] = write_queue_.front();
+    const auto& [current_opcode, body] = write_queue_.front(); // C++17 structured binding
     write_queue_.pop();
 
-    ByteBuffer header;
-    header.write<uint16_t>(static_cast<uint16_t>(opcode));
-    header.write<uint32_t>(static_cast<uint32_t>(body.size()));
-
+    // Формируем пакет
     ByteBuffer packet;
-    packet.append(header);  // Сначала добавляем заголовок
-    packet.append(body);    // Затем добавляем тело
+    packet.write_uint16(static_cast<uint16_t>(current_opcode));
+    packet.write_uint32(static_cast<uint32_t>(body.size()));
+    packet.write(body.data(), body.size());
 
+    // Отправляем асинхронно
     auto self = shared_from_this();
     boost::asio::async_write(
             socket_,
             boost::asio::buffer(packet.data(), packet.size()),
-            [this, self](auto ec, auto bytes) {
+            [this, self, opcode = current_opcode](auto ec, auto bytes) { // Захватываем opcode
                 if (ec) {
-                    std::cerr << "[CLIENT] Write failed: " << ec.message() << "\n";
+                    std::cerr << "[CLIENT] Write failed for opcode "
+                              << static_cast<int>(opcode) << ": "
+                              << ec.message() << "\n";
                     close();
                     return;
                 }
 
-                std::cout << "[CLIENT] Successfully sent " << bytes << " bytes\n";
+                // Успешная отправка
+                std::cout << "[CLIENT] Successfully sent opcode "
+                          << static_cast<int>(opcode)
+                          << ", " << bytes << " bytes\n";
+
                 reset_timeout();
-                do_write();
+                do_write(); // Обрабатываем следующий пакет
             });
 }
 
@@ -149,7 +157,9 @@ void AsyncClient::do_read_body(uint16_t opcode, uint32_t body_size) {
             [this, self, buffer, opcode](auto ec, auto bytes) {
                 if (ec) {
                     if (ec != boost::asio::error::operation_aborted) {
-                        std::cerr << "[CLIENT] Body read failed: " << ec.message() << "\n";
+                        std::cerr << "[CLIENT] Body read failed for opcode "
+                                  << static_cast<int>(opcode) << ": "
+                                  << ec.message() << "\n";
                     }
                     close();
                     return;
@@ -159,31 +169,14 @@ void AsyncClient::do_read_body(uint16_t opcode, uint32_t body_size) {
                     ByteBuffer body;
                     body.write(buffer->data(), bytes);
 
-                    std::cout << "[CLIENT] Received full packet (opcode: " << opcode
-                              << ", size: " << bytes << " bytes)\n";
-
-                    // Обработка пакета
-                    switch (static_cast<Opcode>(opcode)) {
-                        case Opcode::AUTH_RESPONSE: {
-                            auto message = body.read_string();
-                            std::cout << "[CLIENT] Auth response: " << message << "\n";
-                            break;
-                        }
-                        case Opcode::DATA_RESPONSE: {
-                            auto value = body.read<uint32_t>();
-                            auto text = body.read_string();
-                            std::cout << "[CLIENT] Data response: " << value
-                                      << ", text: " << text << "\n";
-                            break;
-                        }
-                        default:
-                            std::cerr << "[CLIENT] Unknown opcode: " << opcode << "\n";
-                    }
+                    // Вызываем обработчик ответа
+                    handle_response(static_cast<Opcode>(opcode), body);
 
                     reset_timeout();
                     do_read_header();
                 } catch (const std::exception& e) {
-                    std::cerr << "[CLIENT] Body processing error: " << e.what() << "\n";
+                    std::cerr << "[CLIENT] Body processing error for opcode "
+                              << static_cast<int>(opcode) << ": " << e.what() << "\n";
                     close();
                 }
             });
@@ -203,5 +196,45 @@ void AsyncClient::close() {
 
     if (ec) {
         std::cerr << "[CLIENT] Close error: " << ec.message() << "\n";
+    }
+}
+
+void AsyncClient::handle_response(Opcode opcode, const ByteBuffer& body) {
+    try {
+        switch (opcode) {
+            case Opcode::SERVER_AUTH_INIT_RES: {
+                uint8_t status = body.read_uint8();
+                std::string message = body.read_string();
+                uint32_t token = body.read_uint32();
+
+                std::cout << "[CLIENT] SERVER_AUTH_INIT_RES: "
+                          << (status ? "Success" : "Failed") << "\n"
+                          << "Message: " << message << "\n"
+                          << "Token: " << token << "\n";
+                break;
+            }
+            case Opcode::SERVER_HELLO_ANSWER: {
+                std::string message = body.read_string();
+
+                std::cout << "[CLIENT] SERVER_HELLO_ANSWER: "
+                          << "Message: " << message << "\n";
+                break;
+            }
+            case Opcode::SERVER_INTERNAL_ERROR_RES: {
+                uint8_t error_code = body.read_uint8();
+                std::string error_msg = body.read_string();
+
+                std::cerr << "[CLIENT] Error response ("
+                          << static_cast<int>(error_code) << "): "
+                          << error_msg << "\n";
+                break;
+            }
+
+            default:
+                std::cerr << "[CLIENT] Unknown response opcode: "
+                          << static_cast<int>(opcode) << "\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[CLIENT] Response processing error: " << e.what() << "\n";
     }
 }

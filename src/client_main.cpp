@@ -17,12 +17,12 @@ int main(int argc, char* argv[]) {
         // Отправка тестовых данных
         ByteBuffer auth_packet;
         auth_packet.write_string("test_user");
-        client->send(Opcode::AUTH_REQUEST, auth_packet);
+        client->send(Opcode::CLIENT_AUTH_INIT_REQ, auth_packet);
 
         ByteBuffer data_packet;
         data_packet.write<uint32_t>(42);
         data_packet.write_string("Hello from client");
-        client->send(Opcode::DATA_REQUEST, data_packet);
+        client->send(Opcode::CLIENT_HELLO_REQ, data_packet);
 
         io_context.run();
     } catch (const std::exception& e) {

@@ -1,4 +1,5 @@
 #pragma once
+
 #include <boost/asio.hpp>
 #include <memory>
 #include <unordered_set>
@@ -15,11 +16,17 @@ class ServerConnection : public std::enable_shared_from_this<ServerConnection> {
     ByteBuffer read_buffer_;
     boost::asio::steady_timer timeout_timer_;
     std::function<void()> on_close_;
-    bool is_closing_ = false;
+    std::atomic<bool> is_closing_{false};
+    std::mutex send_mutex_;
 
     void do_read_header();
+
     void do_read_body(uint16_t opcode, uint32_t body_size);
-    void handle_packet(uint16_t opcode, const ByteBuffer& body);
+
+    bool is_validated_packet(const ByteBuffer& body, size_t expected_size);
+
+    void handle_packet(uint16_t opcode, const ByteBuffer &body);
+
     void reset_timeout();
 
 public:
@@ -30,21 +37,30 @@ public:
     }
 
     void start();
+
     void close(bool force = false);
+
+    void send_packet(Opcode opcode, const ByteBuffer &body);
+
+    void send_error(const std::string &message);
 };
 
 class AsyncServer {
     tcp::acceptor acceptor_;
-    boost::asio::io_context& io_context_;
+    boost::asio::io_context &io_context_;
     std::unordered_set<std::shared_ptr<ServerConnection>> connections_;
     mutable std::mutex connections_mutex_;
 
     void do_accept();
-    void remove_connection(const std::shared_ptr<ServerConnection>& connection);
+
+    void remove_connection(const std::shared_ptr<ServerConnection> &connection);
 
 public:
-    AsyncServer(boost::asio::io_context& io_context, short port);
+    AsyncServer(boost::asio::io_context &io_context, short port);
+
     void start();
+
     void stop();
+
     size_t active_connections() const;
 };
