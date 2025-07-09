@@ -2,21 +2,22 @@ cmake_minimum_required(VERSION 3.10)
 project(purity)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Boost REQUIRED COMPONENTS system timer)
+# Указываем Boost
+find_package(Boost REQUIRED COMPONENTS system)
+include_directories(${Boost_INCLUDE_DIRS})
 
 # Клиент
-add_executable(client
-        src/client_main.cpp
-        src/async_client.cpp
-)
-target_include_directories(client PRIVATE include)
-target_link_libraries(client PRIVATE Boost::system Boost::timer pthread)
+add_executable(client src/client/Client.cpp)
+target_include_directories(client PRIVATE
+        src/common
+        src/client)
+target_link_libraries(client ${Boost_LIBRARIES})
 
 # Сервер
-add_executable(server
-        src/server_main.cpp
-        src/async_server.cpp
-)
-target_include_directories(server PRIVATE include)
-target_link_libraries(server PRIVATE Boost::system Boost::timer pthread)
+add_executable(server src/server/Server.cpp)
+target_include_directories(server PRIVATE
+        src/common
+        src/server)
+target_link_libraries(server ${Boost_LIBRARIES})
