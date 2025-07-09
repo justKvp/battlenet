@@ -1,100 +1,189 @@
-#include "../include/async_server.h"
-#include <iostream>
+#include "async_server.hpp"
 
-class AsyncServer::ClientSession : public std::enable_shared_from_this<AsyncServer::ClientSession> {
-public:
-    ClientSession(tcp::socket socket,
-                  const std::unordered_map<uint32_t, AsyncServer::ClientHandler>& handlers)
-            : socket_(std::move(socket)), handlers_(handlers),
-              buffer_(std::make_unique<ByteBuffer>(1924)) {}
+ServerConnection::ServerConnection(tcp::socket socket)
+        : socket_(std::move(socket)),
+          timeout_timer_(socket_.get_executor()) {}
 
-    void Start() {
-        DoRead();
+void ServerConnection::start() {
+    if (!socket_.is_open()) return;
+
+    try {
+        socket_.set_option(tcp::no_delay(true));
+        socket_.set_option(boost::asio::socket_base::keep_alive(true));
+        reset_timeout();
+        do_read_header();
+        std::cout << "Connection started\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Start error: " << e.what() << "\n";
+        close(true);
     }
+}
 
-private:
-    void DoRead() {
-        auto self = shared_from_this();
-        socket_.async_read_some(
-                boost::asio::buffer(buffer_->Data(), buffer_->Capacity()),
-                [this, self](boost::system::error_code ec, size_t length) {
-                    if (ec) {
-                        HandleDisconnect(ec);
-                        return;
-                    }
-                    ProcessData(length);
-                });
-    }
+void ServerConnection::close(bool force) {
+    if (is_closing_) return;
+    is_closing_ = true;
 
-    void ProcessData(size_t length) {
-        buffer_->SetSize(length);
+    boost::system::error_code ec;
+    timeout_timer_.cancel();
+    if (force) socket_.cancel(ec);
 
-        try {
-            uint32_t opcode = buffer_->ReadInt32();
-            if (auto it = handlers_.find(opcode); it != handlers_.end()) {
-                it->second(*buffer_);
-            } else {
-                std::cerr << "[SERVER] Unknown opcode: " << opcode << "\n";
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[SERVER] Protocol error: " << e.what() << "\n";
-            Close();
-            return;
-        }
-
-        DoRead();
-    }
-
-    void HandleDisconnect(const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::eof) {
-            std::cout << "[SERVER] Client disconnected\n";
-        } else if (ec) {
-            std::cerr << "[SERVER] Error: " << ec.message() << "\n";
-        }
-        Close();
-    }
-
-    void Close() {
-        boost::system::error_code ec;
+    if (socket_.is_open()) {
         socket_.shutdown(tcp::socket::shutdown_both, ec);
-        if (ec) {
-            std::cerr << "[SERVER] Shutdown error: " << ec.message() << "\n";
-        }
         socket_.close(ec);
-        if (ec) {
-            std::cerr << "[SERVER] Close error: " << ec.message() << "\n";
-        }
     }
 
-    tcp::socket socket_;
-    const std::unordered_map<uint32_t, AsyncServer::ClientHandler>& handlers_;
-    std::unique_ptr<ByteBuffer> buffer_;
-};
+    if (on_close_) on_close_();
+    std::cout << "Connection closed\n";
+}
+
+void ServerConnection::reset_timeout() {
+    timeout_timer_.expires_after(std::chrono::seconds(30));
+    timeout_timer_.async_wait(
+            [self = shared_from_this()](boost::system::error_code ec) {
+                if (!ec && self->socket_.is_open()) {
+                    std::cout << "Connection timeout\n";
+                    self->close();
+                }
+            });
+}
+
+void ServerConnection::do_read_header() {
+    auto buffer = std::make_shared<std::array<uint8_t, 6>>();
+
+    auto self = shared_from_this();
+    boost::asio::async_read(socket_,
+                            boost::asio::buffer(*buffer),
+                            [this, self, buffer](boost::system::error_code ec, size_t bytes) {
+                                if (ec) {
+                                    if (ec != boost::asio::error::operation_aborted) {
+                                        std::cerr << "Header read error: " << ec.message() << "\n";
+                                    }
+                                    close();
+                                    return;
+                                }
+
+                                try {
+                                    uint16_t opcode = *reinterpret_cast<uint16_t*>(buffer->data());
+                                    uint32_t body_size = *reinterpret_cast<uint32_t*>(buffer->data() + 2);
+
+                                    if (body_size > 10*1024*1024) {
+                                        throw std::runtime_error("Packet too large");
+                                    }
+
+                                    reset_timeout();
+                                    do_read_body(opcode, body_size);
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Header error: " << e.what() << "\n";
+                                    close(true);
+                                }
+                            });
+}
+
+void ServerConnection::do_read_body(uint16_t opcode, uint32_t body_size) {
+    auto buffer = std::make_shared<std::vector<uint8_t>>(body_size);
+
+    auto self = shared_from_this();
+    boost::asio::async_read(socket_,
+                            boost::asio::buffer(*buffer),
+                            [this, self, buffer, opcode](boost::system::error_code ec, size_t bytes) {
+                                if (ec) {
+                                    if (ec != boost::asio::error::operation_aborted) {
+                                        std::cerr << "Body read error: " << ec.message() << "\n";
+                                    }
+                                    close();
+                                    return;
+                                }
+
+                                try {
+                                    read_buffer_.clear();
+                                    read_buffer_.write(buffer->data(), bytes);
+                                    handle_packet(opcode, read_buffer_);
+
+                                    if (socket_.is_open()) {
+                                        reset_timeout();
+                                        do_read_header();
+                                    }
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Body error: " << e.what() << "\n";
+                                    close(true);
+                                }
+                            });
+}
+
+void ServerConnection::handle_packet(uint16_t opcode, const ByteBuffer& body) {
+    try {
+        switch (static_cast<Opcode>(opcode)) {
+            case Opcode::AUTH_REQUEST: {
+                std::string username = body.read_string();
+                std::cout << "Auth from: " << username << "\n";
+
+                ByteBuffer response;
+                response.write_string("Welcome " + username);
+                boost::asio::write(socket_,
+                                   boost::asio::buffer(response.data(), response.size()));
+                break;
+            }
+            default:
+                std::cerr << "Unknown opcode: " << opcode << "\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Handle packet error: " << e.what() << "\n";
+        throw;
+    }
+}
 
 AsyncServer::AsyncServer(boost::asio::io_context& io_context, short port)
-        : io_context_(io_context),
-          acceptor_(io_context, tcp::endpoint(tcp::v4(), port)) {
-    DoAccept();
+        : acceptor_(io_context, tcp::endpoint(tcp::v4(), port)),
+          io_context_(io_context) {}
+
+void AsyncServer::start() {
+    do_accept();
 }
 
-void AsyncServer::Start() {
-    std::cout << "[SERVER] Started on port " << acceptor_.local_endpoint().port() << "\n";
-    io_context_.run();
+void AsyncServer::stop() {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+    acceptor_.close();
+
+    for (auto& conn : connections_) {
+        conn->close(true);
+    }
+    connections_.clear();
 }
 
-void AsyncServer::SetHandler(uint32_t opcode, ClientHandler handler) {
-    handlers_[opcode] = std::move(handler);
-}
-
-void AsyncServer::DoAccept() {
+void AsyncServer::do_accept() {
     acceptor_.async_accept(
             [this](boost::system::error_code ec, tcp::socket socket) {
                 if (!ec) {
-                    std::cout << "[SERVER] New connection\n";
-                    std::make_shared<ClientSession>(std::move(socket), handlers_)->Start();
-                } else {
-                    std::cerr << "[SERVER] Accept error: " << ec.message() << "\n";
+                    auto conn = std::make_shared<ServerConnection>(std::move(socket));
+
+                    {
+                        std::lock_guard<std::mutex> lock(connections_mutex_);
+                        connections_.insert(conn);
+                    }
+
+                    conn->set_on_close([this, conn]() {
+                        std::lock_guard<std::mutex> lock(connections_mutex_);
+                        remove_connection(conn);
+                    });
+
+                    conn->start();
+                    std::cout << "New connection. Total: "
+                              << active_connections() << "\n";
                 }
-                DoAccept(); // Важно: рекурсивный вызов
+
+                if (acceptor_.is_open()) {
+                    do_accept();
+                }
             });
+}
+
+void AsyncServer::remove_connection(const std::shared_ptr<ServerConnection>& conn) {
+    connections_.erase(conn);
+    std::cout << "Connection removed. Active: "
+              << connections_.size() << "\n";
+}
+
+size_t AsyncServer::active_connections() const {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+    return connections_.size();
 }

@@ -1,25 +1,36 @@
-#include "../include/async_client.h"
-#include <chrono>
-#include <thread>
+#include "async_client.hpp"
+#include <boost/asio.hpp>
+#include <iostream>
 
-using namespace std::chrono_literals;
+int main(int argc, char* argv[]) {
+    try {
+        if (argc != 3) {
+            std::cerr << "Usage: client <host> <port>\n";
+            return 1;
+        }
 
-int main() {
-    AsyncClient client("127.0.0.1", "1234");
-    client.Connect();
+        boost::asio::io_context io_context;
 
-    // Wait for connection
-    int attempts = 0;
-    while (!client.IsConnected() && attempts++ < 10) {
-        std::this_thread::sleep_for(100ms);
+        // Создаем и настраиваем клиента
+        auto client = std::make_shared<AsyncClient>(io_context);
+        client->connect(argv[1], argv[2]);
+
+        // Пример отправки аутентификационного запроса
+        ByteBuffer auth_packet;
+        auth_packet.write_string("test_user");
+        client->send(Opcode::AUTH_REQUEST, auth_packet);
+
+        // Пример отправки данных
+        ByteBuffer data_packet;
+        data_packet.write<uint32_t>(42);
+        data_packet.write_string("Sample data");
+        client->send(Opcode::DATA_REQUEST, data_packet);
+
+        // Запускаем обработку событий
+        io_context.run();
+    } catch (std::exception& e) {
+        std::cerr << "Client exception: " << e.what() << "\n";
+        return 1;
     }
-
-    if (client.IsConnected()) {
-        client.SendInventoryMove(1, 5, 12345);
-        std::this_thread::sleep_for(100ms);
-        client.SendInventoryMove(2, 3, 67890);
-    }
-
-    std::this_thread::sleep_for(2s);
     return 0;
 }

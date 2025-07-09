@@ -1,167 +1,160 @@
-#include "../include/async_client.h"
-#include <boost/asio/steady_timer.hpp>
+#include "async_client.hpp"
 #include <iostream>
 
-using namespace boost::asio;
-using namespace std::chrono_literals;
+void AsyncClient::connect(const std::string& host, const std::string& port) {
+    tcp::resolver resolver(socket_.get_executor());
 
-AsyncClient::AsyncClient(const std::string& host, const std::string& port)
-        : host_(host), port_(port),
-          socket_(io_context_),
-          resolver_(io_context_),
-          read_buffer_(1024) {
+    boost::system::error_code resolve_ec;
+    auto endpoints = resolver.resolve(host, port, resolve_ec);
 
-    worker_thread_ = std::thread([this]() {
-        io_context_.run();
-    });
-}
-
-AsyncClient::~AsyncClient() {
-    io_context_.stop();
-    if (socket_.is_open()) {
-        socket_.close();
-    }
-    if (worker_thread_.joinable()) {
-        worker_thread_.join();
-    }
-}
-
-void AsyncClient::Connect() {
-    auto timer = std::make_shared<steady_timer>(io_context_);
-    timer->expires_after(5s);
-
-    timer->async_wait([this](const boost::system::error_code& ec) {
-        if (!ec) {
-            std::cerr << "[CLIENT] Connection timeout\n";
-            timeout_occurred_ = true;
-            socket_.close();
-        }
-    });
-
-    resolver_.async_resolve(host_, port_,
-                            [this, timer](const boost::system::error_code& ec,
-                                          ip::tcp::resolver::results_type endpoints) {
-                                if (ec) {
-                                    std::cerr << "[CLIENT] Resolve error: " << ec.message() << "\n";
-                                    timer->cancel();
-                                    return;
-                                }
-
-                                timer->expires_after(3s);
-                                async_connect(socket_, endpoints,
-                                              [this, timer](const boost::system::error_code& ec,
-                                                            const ip::tcp::endpoint& endpoint) {
-                                                  timer->cancel();
-                                                  if (ec) {
-                                                      std::cerr << "[CLIENT] Connect error: " << ec.message() << "\n";
-                                                      return;
-                                                  }
-
-                                                  {
-                                                      std::lock_guard<std::mutex> lock(connection_mutex_);
-                                                      connected_ = true;
-                                                      timeout_occurred_ = false;
-                                                  }
-                                                  std::cout << "[CLIENT] Connected to " << endpoint << "\n";
-                                                  StartRead();
-                                              });
-                            });
-}
-
-void AsyncClient::Send(const ByteBuffer& data) {
-    if (timeout_occurred_) {
-        Reconnect();
-    }
-
-    if (!IsConnected()) {
-        std::cerr << "[CLIENT] Not connected, cannot send\n";
+    if (resolve_ec) {
+        std::cerr << "Resolve error: " << resolve_ec.message() << "\n";
         return;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        outgoing_queue_.push(data);
+    if (endpoints.empty()) {
+        std::cerr << "No endpoints found\n";
+        return;
     }
 
-    if (!writing_) {
-        StartWrite();
+    connect_timer_.expires_after(std::chrono::seconds(10));
+    connect_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (!ec) socket_.close();
+    });
+
+    auto self = shared_from_this();
+    boost::asio::async_connect(
+            socket_,
+            endpoints,
+            [this, self](const boost::system::error_code& ec,
+                         const tcp::endpoint& selected_endpoint) {
+                connect_timer_.cancel();
+                if (ec) {
+                    std::cerr << "Connect error: " << ec.message() << "\n";
+                    return;
+                }
+
+                std::cout << "Connected to: "
+                          << selected_endpoint.address().to_string()
+                          << ":" << selected_endpoint.port() << "\n";
+
+                socket_.set_option(tcp::no_delay(true));
+                reset_timeout();
+                do_read_header();
+            });
+}
+
+void AsyncClient::send(Opcode opcode, const ByteBuffer& body) {
+    write_queue_.emplace(opcode, body);
+    if (!is_writing_) {
+        do_write();
     }
 }
 
-void AsyncClient::StartWrite() {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (outgoing_queue_.empty()) return;
+void AsyncClient::do_write() {
+    if (write_queue_.empty()) {
+        is_writing_ = false;
+        return;
+    }
 
-    auto timer = std::make_shared<steady_timer>(io_context_);
-    timer->expires_after(2s);
+    is_writing_ = true;
+    auto [opcode, body] = write_queue_.front();
+    write_queue_.pop();
 
-    writing_ = true;
-    const auto& data = outgoing_queue_.front();
+    ByteBuffer packet;
+    packet.write<uint16_t>(static_cast<uint16_t>(opcode));
+    packet.write<uint32_t>(static_cast<uint32_t>(body.size()));
+    packet.write(body.data(), body.size());
 
-    async_write(socket_, buffer(data.Data(), data.Size()),
-                [this, timer](const boost::system::error_code& ec, size_t bytes) {
-                    timer->cancel();
-                    writing_ = false;
-                    if (!ec) {
-                        std::cout << "[CLIENT] Sent " << bytes << " bytes\n";
-                        std::lock_guard<std::mutex> lock(queue_mutex_);
-                        outgoing_queue_.pop();
-                        if (!outgoing_queue_.empty()) {
-                            StartWrite();
-                        }
-                    } else {
-                        std::cerr << "[CLIENT] Write error: " << ec.message() << "\n";
-                        std::lock_guard<std::mutex> lock(connection_mutex_);
-                        connected_ = false;
-                    }
-                });
+    auto self = shared_from_this();
+    boost::asio::async_write(socket_,
+                             boost::asio::buffer(packet.data(), packet.size()),
+                             [this, self](auto ec, auto) {
+                                 if (ec) {
+                                     std::cerr << "Write error: " << ec.message() << "\n";
+                                     close();
+                                     return;
+                                 }
 
-    timer->async_wait([this](const boost::system::error_code& ec) {
-        if (!ec) {
-            std::cerr << "[CLIENT] Write timeout\n";
-            socket_.close();
-            timeout_occurred_ = true;
-        }
+                                 reset_timeout();
+                                 do_write();
+                             });
+}
+
+void AsyncClient::reset_timeout() {
+    timeout_timer_.expires_after(std::chrono::seconds(30));
+    timeout_timer_.async_wait([self = shared_from_this()](auto ec) {
+        if (!ec) self->close();
     });
 }
 
-void AsyncClient::StartRead() {
-    socket_.async_read_some(buffer(read_buffer_.Data(), read_buffer_.Capacity()),
-                            [this](const boost::system::error_code& ec, size_t bytes) {
-                                if (!ec) {
-                                    read_buffer_.SetSize(bytes);
-                                    std::cout << "[CLIENT] Received " << bytes << " bytes\n";
-                                    StartRead();
-                                } else if (ec != error::eof) {
-                                    std::cerr << "[CLIENT] Read error: " << ec.message() << "\n";
+void AsyncClient::do_read_header() {
+    auto buffer = std::make_shared<std::array<uint8_t, 6>>();
+
+    auto self = shared_from_this();
+    boost::asio::async_read(socket_,
+                            boost::asio::buffer(*buffer),
+                            [this, self, buffer](auto ec, auto bytes) {
+                                if (ec) {
+                                    if (ec != boost::asio::error::operation_aborted) {
+                                        std::cerr << "Read header error: " << ec.message() << "\n";
+                                    }
+                                    close();
+                                    return;
+                                }
+
+                                try {
+                                    read_buffer_.clear();
+                                    read_buffer_.write(buffer->data(), bytes);
+
+                                    uint16_t opcode = read_buffer_.read<uint16_t>();
+                                    uint32_t body_size = read_buffer_.read<uint32_t>();
+
+                                    if (body_size > 1024*1024) {
+                                        throw std::runtime_error("Packet too large");
+                                    }
+
+                                    reset_timeout();
+                                    do_read_body(opcode, body_size);
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Header processing error: " << e.what() << "\n";
+                                    close();
                                 }
                             });
 }
 
-bool AsyncClient::IsConnected() const {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    return connected_;
+void AsyncClient::do_read_body(uint16_t opcode, uint32_t body_size) {
+    auto buffer = std::make_shared<std::vector<uint8_t>>(body_size);
+
+    auto self = shared_from_this();
+    boost::asio::async_read(socket_,
+                            boost::asio::buffer(*buffer),
+                            [this, self, buffer, opcode](auto ec, auto bytes) {
+                                if (ec) {
+                                    std::cerr << "Read body error: " << ec.message() << "\n";
+                                    close();
+                                    return;
+                                }
+
+                                try {
+                                    read_buffer_.clear();
+                                    read_buffer_.write(buffer->data(), bytes);
+
+                                    std::cout << "Received packet, opcode: " << opcode
+                                              << ", size: " << bytes << " bytes\n";
+
+                                    reset_timeout();
+                                    do_read_header();
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Body processing error: " << e.what() << "\n";
+                                    close();
+                                }
+                            });
 }
 
-void AsyncClient::Reconnect() {
-    if (socket_.is_open()) {
-        socket_.close();
-    }
-    {
-        std::lock_guard<std::mutex> lock(connection_mutex_);
-        connected_ = false;
-    }
-    Connect();
-}
-
-void AsyncClient::SendInventoryMove(int from, int to, int item) {
-    ByteBuffer buffer(16);
-    buffer.WriteInt32(1);  // Явно указываем opcode=1
-    buffer.WriteInt32(from);
-    buffer.WriteInt32(to);
-    buffer.WriteInt32(item);
-
-    // Отладочный вывод
-    std::cout << "Sending opcode: " << buffer.ReadInt32() << "\n";
-    Send(buffer);
+void AsyncClient::close() {
+    boost::system::error_code ec;
+    socket_.close(ec);
+    connect_timer_.cancel();
+    timeout_timer_.cancel();
 }
