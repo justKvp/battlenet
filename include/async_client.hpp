@@ -30,4 +30,5 @@ public:
     void connect(const std::string& host, const std::string& port);
     void send(Opcode opcode, const ByteBuffer& body);
     void close();
+    bool is_connected() const { return socket_.is_open(); }
 };

@@ -3,10 +3,12 @@
 #include <cstdint>
 #include <string>
 #include <stdexcept>
+#include <type_traits>
+#include <cstring>
 
 class ByteBuffer {
     std::vector<uint8_t> buffer_;
-    mutable size_t read_pos_ = 0; // mutable для константных операций
+    mutable size_t read_pos_ = 0;
 
 public:
     ByteBuffer() = default;
@@ -25,26 +27,12 @@ public:
         write(&value, sizeof(T));
     }
 
-    // Чтение данных (неконстантная версия)
-    void read(void* dest, size_t size) {
-        check_read_bound(size);
-        memcpy(dest, buffer_.data() + read_pos_, size);
-        read_pos_ += size;
-    }
-
-    template<typename T>
-    T read() {
-        static_assert(std::is_trivially_copyable_v<T>,
-                      "Type must be trivially copyable");
-        T value;
-        read(&value, sizeof(T));
-        return value;
-    }
-
-    // Чтение данных (константная версия)
+    // Чтение данных
     void read(void* dest, size_t size) const {
-        check_read_bound(size);
-        memcpy(dest, buffer_.data() + read_pos_, size);
+        if (read_pos_ + size > buffer_.size()) {
+            throw std::out_of_range("ByteBuffer read out of range");
+        }
+        std::memcpy(dest, buffer_.data() + read_pos_, size);
         read_pos_ += size;
     }
 
@@ -57,19 +45,20 @@ public:
         return value;
     }
 
-    // Специализированные методы для строк
+    // Строковые операции
     void write_string(const std::string& str) {
-        write<uint32_t>(static_cast<uint32_t>(str.size()));
-        write(str.data(), str.size());
+        uint32_t length = static_cast<uint32_t>(str.size());
+        write(length);
+        write(str.data(), length);
     }
 
     std::string read_string() const {
-        uint32_t size = read<uint32_t>();
-        if (size > 1024 * 1024) { // Защита от слишком больших строк
+        uint32_t length = read<uint32_t>();
+        if (length > 1024*1024) {
             throw std::runtime_error("String size too large");
         }
-        std::string result(size, '\0');
-        read(&result[0], size);
+        std::string result(length, '\0');
+        read(&result[0], length);
         return result;
     }
 
@@ -79,15 +68,15 @@ public:
         read_pos_ = 0;
     }
 
-    // Доступ к данным
     const uint8_t* data() const { return buffer_.data(); }
     size_t size() const { return buffer_.size(); }
     size_t remaining() const { return buffer_.size() - read_pos_; }
+    void rewind() const { read_pos_ = 0; }
 
-private:
-    void check_read_bound(size_t size) const {
-        if (read_pos_ + size > buffer_.size()) {
-            throw std::runtime_error("ByteBuffer underflow");
-        }
+    // Добавленные предложения:
+    void append(const ByteBuffer& other) {
+        buffer_.insert(buffer_.end(), other.buffer_.begin(), other.buffer_.end());
     }
+
+    bool empty() const { return buffer_.empty(); }
 };
