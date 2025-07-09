@@ -6,21 +6,41 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Указываем Boost
 find_package(Boost REQUIRED COMPONENTS system)
-include_directories(${Boost_INCLUDE_DIRS})
+
+# Автоматический поиск исходников
+file(GLOB_RECURSE COMMON_SOURCES CONFIGURE_DEPENDS src/common/*.cpp)
+file(GLOB_RECURSE CLIENT_SOURCES CONFIGURE_DEPENDS src/client/*.cpp)
+file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS src/server/*.cpp)
+
+# Общие include директории
+set(COMMON_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/src/common
+)
 
 # Клиент
-add_executable(client src/client/main_client.cpp
-        src/client/Client.cpp)
+add_executable(client
+        src/main_client.cpp
+        ${CLIENT_SOURCES}
+)
 target_include_directories(client PRIVATE
-        src/common
-        src/client)
-target_link_libraries(client ${Boost_LIBRARIES})
+        ${COMMON_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}
+        ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(client PRIVATE
+        ${Boost_LIBRARIES}
+)
 
 # Сервер
-add_executable(server src/server/main_server.cpp
-        src/server/Server.cpp
-        src/server/ClientSession.cpp)
+add_executable(server
+        src/main_server.cpp
+        ${SERVER_SOURCES}
+)
 target_include_directories(server PRIVATE
-        src/common
-        src/server)
-target_link_libraries(server ${Boost_LIBRARIES})
+        ${COMMON_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}
+        ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(server PRIVATE
+        ${Boost_LIBRARIES}
+)

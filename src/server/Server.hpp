@@ -4,7 +4,7 @@
 #include <memory>
 #include <unordered_set>
 #include <mutex>
-#include "ClientSession.hpp"
+#include "ClientSession/ClientSession.hpp"
 
 class ClientSession; // forward declaration
 
