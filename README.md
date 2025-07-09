@@ -4,10 +4,11 @@
 
 ### 4.1. Release
 
-mkdir -p build/Release && cd build/Release
+mkdir build && cd build
 
-conan install ../.. --build=missing -s build_type=Release
+cmake ..
 
-cmake ../.. -DCMAKE_TOOLCHAIN_FILE=generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+make -j 4             (or another threads count)
 
-cmake --build .
+
+
