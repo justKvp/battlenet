@@ -10,12 +10,15 @@ class Client {
 public:
     Client(boost::asio::io_context &io_context, const std::string &host, int port);
 
-    void run();
+    void connect();
+
+    void disconnect();
 
     void send_message(const std::string &msg);
 
+    void send_hello(const std::string &msg, const uint8_t &number, const float &value);
+
 private:
-    void connect();
 
     void schedule_reconnect();
 

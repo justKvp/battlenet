@@ -59,16 +59,28 @@ void ClientSession::read_body(std::size_t size) {
 
 void ClientSession::handle_packet(Packet& packet) {
     switch (packet.opcode) {
-        case Opcode::PING: {
-            std::cout << "[Server] Received PING\n";
-            Packet pong;
-            pong.opcode = Opcode::PONG;
-            send_packet(pong);
-            break;
-        }
         case Opcode::MESSAGE: {
             std::string msg = packet.buffer.read_string();
             std::cout << "[Server] Message: " << msg << "\n";
+            break;
+        }
+        case Opcode::CMSG_PING: {
+            std::cout << "[Server] Received CMSG_PING\n";
+            Packet pong;
+            pong.opcode = Opcode::SMSG_PONG;
+            send_packet(pong);
+            break;
+        }
+        case Opcode::CMSG_HELLO: {
+            std::string msg = packet.buffer.read_string();
+            uint8_t number = packet.buffer.read_uint8();
+            float value = packet.buffer.read_float();
+
+            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode) << "] SMSG_HELLO_RES : msg[" << msg << "] uint8_t[" << static_cast<int>(number) << "] float[" << value << "]\n";
+
+            Packet resp;
+            resp.opcode = Opcode::SMSG_HELLO_RES;
+            send_packet(resp);
             break;
         }
         default:

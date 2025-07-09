@@ -27,6 +27,26 @@ void Client::connect() {
                                });
 }
 
+void Client::disconnect() {
+    boost::asio::post(io, [this]() {
+        boost::system::error_code ignored_ec;
+
+        // Отменить таймеры
+        heartbeat_timer.cancel(ignored_ec);
+        reconnect_timer.cancel(ignored_ec);
+
+        // Закрыть сокет
+        if (socket.is_open()) {
+            socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ignored_ec);
+            socket.close(ignored_ec);
+        }
+
+        connected = false;
+
+        std::cout << "[Client] Disconnected from server\n";
+    });
+}
+
 void Client::schedule_reconnect() {
     connected = false;
     socket.close();
@@ -49,7 +69,7 @@ void Client::start_heartbeat() {
 
 void Client::send_ping() {
     Packet ping;
-    ping.opcode = Opcode::PING;
+    ping.opcode = Opcode::CMSG_PING;
     send_packet(ping);
 }
 
@@ -57,6 +77,15 @@ void Client::send_message(const std::string &msg) {
     Packet p;
     p.opcode = Opcode::MESSAGE;
     p.buffer.write_string(msg);
+    send_packet(p);
+}
+
+void Client::send_hello(const std::string &msg, const uint8_t &number, const float &value) {
+    Packet p;
+    p.opcode = Opcode::CMSG_HELLO;
+    p.buffer.write_string(msg);
+    p.buffer.write_uint8(number);
+    p.buffer.write_float(value);
     send_packet(p);
 }
 
@@ -147,23 +176,14 @@ void Client::start_receive_loop() {
 
 void Client::handle_packet(const Packet &p) {
     switch (p.opcode) {
-        case Opcode::PONG:
-            std::cout << "[Client] Received PONG\n";
+        case Opcode::SMSG_PONG:
+            std::cout << "[Client] Received SMSG_PONG\n";
+            break;
+        case Opcode::SMSG_HELLO_RES:
+            std::cout << "[Client] Received SMSG_HELLO_RES\n";
             break;
         default:
             std::cout << "[Client] Unknown opcode: " << static_cast<int>(p.opcode) << "\n";
             break;
     }
-}
-
-void Client::run() {
-    connect();
-
-    // Read user input in a separate thread
-    std::thread([this]() {
-        std::string line;
-        while (std::getline(std::cin, line)) {
-            send_message(line);
-        }
-    }).detach();
 }
