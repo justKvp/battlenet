@@ -11,7 +11,16 @@ int main() {
 
         std::cout << "[Server] Running on port " << port << std::endl;
 
+        // Подписываемся на SIGINT и SIGTERM
+        boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
+        signals.async_wait([&](const boost::system::error_code&, int signal_number) {
+            std::cout << "[Server] Signal " << signal_number << " received, shutting down...\n";
+            io_context.stop();
+        });
+
         io_context.run();
+
+        std::cout << "[Server] Shutting down gracefully.\n";
     } catch (const std::exception& e) {
         std::cerr << "[Server] Exception: " << e.what() << std::endl;
     }

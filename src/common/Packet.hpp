@@ -14,7 +14,7 @@ struct Packet {
         result.push_back(static_cast<uint8_t>(opcode));
 
         // 2) Потом все данные ByteBuffer
-        const auto& payload = buffer.data();
+        const auto &payload = buffer.data();
         result.insert(result.end(), payload.begin(), payload.end());
 
         // 3) Длина пакета = opcode + payload
@@ -30,7 +30,7 @@ struct Packet {
     }
 
     // Десериализация из байтов: data без size (только [opcode][payload])
-    static Packet deserialize(const std::vector<uint8_t>& data) {
+    static Packet deserialize(const std::vector<uint8_t> &data) {
         if (data.empty()) {
             throw std::runtime_error("Empty packet");
         }
@@ -45,8 +45,8 @@ struct Packet {
         packet.buffer = ByteBuffer(payload);
 
         // DEBUG:
-        std::cout << "[Packet] Deserialized opcode: " << static_cast<int>(packet.opcode)
-                  << ", payload size: " << payload.size() << "\n";
+        //std::cout << "[Packet] Deserialized opcode: " << static_cast<int>(packet.opcode)
+        //          << ", payload size: " << payload.size() << "\n";
 
         return packet;
     }
