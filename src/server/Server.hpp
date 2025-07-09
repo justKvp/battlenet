@@ -1,23 +1,23 @@
 #pragma once
 
 #include <boost/asio.hpp>
-#include <set>
 #include <memory>
+#include <unordered_set>
+#include <mutex>
+#include "ClientSession.hpp"
 
-class ClientSession;
+class ClientSession; // forward declaration
 
-class Server {
+class Server : public std::enable_shared_from_this<Server> {
 public:
-    Server(boost::asio::io_context &io_context, int port);
-
-    void start_accept();
-
+    Server(boost::asio::io_context& io_context, int port);
     void remove_session(std::shared_ptr<ClientSession> session);
 
 private:
-    void handle_accept(std::shared_ptr<ClientSession> session, const boost::system::error_code &ec);
+    void start_accept();
 
-    boost::asio::io_context &io_context;
-    boost::asio::ip::tcp::acceptor acceptor;
-    std::set<std::shared_ptr<ClientSession>> sessions;
+    boost::asio::ip::tcp::acceptor acceptor_;
+    std::unordered_set<std::shared_ptr<ClientSession>> sessions_;
+    std::mutex sessions_mutex_;
+    boost::asio::io_context& io_context_;
 };
