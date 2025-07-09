@@ -18,7 +18,8 @@ target_link_libraries(client ${Boost_LIBRARIES})
 
 # Сервер
 add_executable(server src/server/main_server.cpp
-        src/server/Server.cpp)
+        src/server/Server.cpp
+        src/server/ClientSession.cpp)
 target_include_directories(server PRIVATE
         src/common
         src/server)

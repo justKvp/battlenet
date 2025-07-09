@@ -3,28 +3,35 @@
 #include <boost/asio.hpp>
 #include <queue>
 #include <string>
-#include <thread>
 #include <vector>
-#include "Packet.hpp"  // Здесь должны быть определения Packet и Opcode
+#include "Packet.hpp"
 
 class Client {
 public:
-    Client(boost::asio::io_context& io_context, const std::string& host, int port);
+    Client(boost::asio::io_context &io_context, const std::string &host, int port);
 
     void run();
-    void send_message(const std::string& msg);
-    void send_ping();
+
+    void send_message(const std::string &msg);
 
 private:
     void connect();
-    void schedule_reconnect();
-    void start_heartbeat();
-    void start_receive_loop();
-    void flush_queue();
-    void send_packet(const Packet& packet);
-    void handle_packet(const Packet& p);
 
-    boost::asio::io_context& io;
+    void schedule_reconnect();
+
+    void start_heartbeat();
+
+    void send_ping();
+
+    void send_packet(const Packet &packet);
+
+    void flush_queue();
+
+    void start_receive_loop();
+
+    void handle_packet(const Packet &packet);
+
+    boost::asio::io_context &io;
     boost::asio::ip::tcp::socket socket;
     std::string host;
     int port;

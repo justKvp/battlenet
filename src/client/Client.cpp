@@ -4,7 +4,7 @@
 using boost::asio::ip::tcp;
 using namespace std::chrono_literals;
 
-Client::Client(boost::asio::io_context& io_context, const std::string& h, int p)
+Client::Client(boost::asio::io_context &io_context, const std::string &h, int p)
         : io(io_context), socket(io_context), host(h), port(p), connected(false),
           reconnect_timer(io_context), heartbeat_timer(io_context) {}
 
@@ -31,7 +31,7 @@ void Client::schedule_reconnect() {
     connected = false;
     socket.close();
     reconnect_timer.expires_after(3s);
-    reconnect_timer.async_wait([this](const boost::system::error_code&) {
+    reconnect_timer.async_wait([this](const boost::system::error_code &) {
         std::cout << "[Client] Attempting reconnect...\n";
         connect();
     });
@@ -39,7 +39,7 @@ void Client::schedule_reconnect() {
 
 void Client::start_heartbeat() {
     heartbeat_timer.expires_after(5s);
-    heartbeat_timer.async_wait([this](const boost::system::error_code& ec) {
+    heartbeat_timer.async_wait([this](const boost::system::error_code &ec) {
         if (!ec && connected) {
             send_ping();
             start_heartbeat(); // schedule next
@@ -53,14 +53,14 @@ void Client::send_ping() {
     send_packet(ping);
 }
 
-void Client::send_message(const std::string& msg) {
+void Client::send_message(const std::string &msg) {
     Packet p;
     p.opcode = Opcode::MESSAGE;
     p.buffer.write_string(msg);
     send_packet(p);
 }
 
-void Client::send_packet(const Packet& packet) {
+void Client::send_packet(const Packet &packet) {
     std::vector<uint8_t> data = packet.serialize();
 
     if (!connected) {
@@ -81,7 +81,7 @@ void Client::flush_queue() {
     if (!connected || outgoing_queue.empty())
         return;
 
-    auto& front = outgoing_queue.front();
+    auto &front = outgoing_queue.front();
     boost::asio::async_write(socket, boost::asio::buffer(front),
                              [this](boost::system::error_code ec, std::size_t) {
                                  if (ec) {
@@ -113,7 +113,8 @@ void Client::start_receive_loop() {
                                 boost::asio::async_read(socket, boost::asio::buffer(*body),
                                                         [this, body](boost::system::error_code ec2, std::size_t) {
                                                             if (ec2) {
-                                                                std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
+                                                                std::cerr << "[Client] Read body failed: "
+                                                                          << ec2.message() << "\n";
                                                                 connected = false;
                                                                 schedule_reconnect();
                                                                 return;
@@ -131,7 +132,7 @@ void Client::start_receive_loop() {
                             });
 }
 
-void Client::handle_packet(const Packet& p) {
+void Client::handle_packet(const Packet &p) {
     switch (p.opcode) {
         case Opcode::PONG:
             std::cout << "[Client] Received PONG\n";
