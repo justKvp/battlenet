@@ -23,6 +23,7 @@ add_executable(client
         ${CLIENT_SOURCES}
 )
 target_include_directories(client PRIVATE
+        ${CLIENT_SOURCES}
         ${COMMON_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}
         ${Boost_INCLUDE_DIRS}
@@ -37,6 +38,7 @@ add_executable(server
         ${SERVER_SOURCES}
 )
 target_include_directories(server PRIVATE
+        ${SERVER_SOURCES}
         ${COMMON_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}
         ${Boost_INCLUDE_DIRS}

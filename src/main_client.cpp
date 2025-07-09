@@ -1,7 +1,7 @@
 #include <boost/asio.hpp>
 #include <csignal>
 #include <iostream>
-#include "Client.hpp"
+#include "client/Client.hpp"
 
 int main() {
     boost::asio::io_context io;
