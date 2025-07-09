@@ -2,6 +2,7 @@
 #include <boost/asio.hpp>
 #include <csignal>
 #include <memory>
+#include <iostream>
 
 std::shared_ptr<AsyncServer> server;
 
