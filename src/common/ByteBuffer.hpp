@@ -52,6 +52,9 @@ public:
     void write_bool(bool value) { write_uint8(value ? 1 : 0); }
 
     void write_string(const std::string& str) {
+        if (str.size() > UINT16_MAX) {
+            throw std::runtime_error("String too long for uint16 length prefix");
+        }
         write_uint16(static_cast<uint16_t>(str.size()));
         buffer_.insert(buffer_.end(), str.begin(), str.end());
     }
