@@ -158,7 +158,13 @@ void Client::start_receive_loop() {
     boost::asio::async_read(socket, boost::asio::buffer(*header),
                             [this, header](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
-                                    std::cerr << "[Client] Read header failed: " << ec.message() << "\n";
+                                    if (ec == boost::asio::error::operation_aborted) {
+                                        std::cout << "[Client] Client disconnected\n";
+                                    } else if (ec == boost::asio::error::eof) {
+                                        std::cout << "[Client] Client closed connection normally (EOF)\n";
+                                    } else {
+                                        std::cerr << "[Client] Header read failed: " << ec.message() << "\n";
+                                    }
                                     connected = false;
                                     schedule_reconnect();
                                     return;
@@ -177,7 +183,13 @@ void Client::start_receive_loop() {
                                 boost::asio::async_read(socket, boost::asio::buffer(*body),
                                                         [this, body](boost::system::error_code ec2, std::size_t) {
                                                             if (ec2) {
-                                                                std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
+                                                                if (ec2 == boost::asio::error::operation_aborted) {
+                                                                    std::cout << "[Client] Client disconnected\n";
+                                                                } else if (ec2 == boost::asio::error::eof) {
+                                                                    std::cout << "[Client] Client closed connection normally (EOF)\n";
+                                                                } else {
+                                                                    std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
+                                                                }
                                                                 connected = false;
                                                                 schedule_reconnect();
                                                                 return;
