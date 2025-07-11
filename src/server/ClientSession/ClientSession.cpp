@@ -106,7 +106,7 @@ void ClientSession::handle_packet(Packet &packet) {
 
             // АСИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
-            spawn([self]() -> boost::asio::awaitable<void> {
+            async_query([self]() -> boost::asio::awaitable<void> {
                 try {
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, 1);
@@ -134,7 +134,7 @@ void ClientSession::handle_packet(Packet &packet) {
 
             // СИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
-            post([self]() {
+            blocking_query([self]() {
                 try {
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, 2);
@@ -160,7 +160,7 @@ void ClientSession::handle_packet(Packet &packet) {
 
             // Асинхронный без возврата значений
             auto self = shared_from_this();
-            spawn([self]() -> boost::asio::awaitable<void> {
+            async_query([self]() -> boost::asio::awaitable<void> {
                 try {
                     PreparedStatement stmt("UPDATE_SOMETHING");
                     stmt.set_param(0, 1);

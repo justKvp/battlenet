@@ -20,10 +20,10 @@ public:
 
     // Позволяет запускать задачи в thread_pool сервера
     template <typename Func>
-    void post(Func&& func);
+    void async_query(Func&& func);
 
     template <typename Func>
-    void spawn(Func&& func);
+    void blocking_query(Func&& func);
 
 private:
     void read_header();
