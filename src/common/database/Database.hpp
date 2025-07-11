@@ -62,17 +62,17 @@ private:
     template<typename Struct>
     Struct execute_prepared_sync(PreparedStatement stmt) {
         pqxx::work txn(connection_);
-        auto invoc = txn.prepared(stmt.name());
 
+        std::vector<const char*> params;
         for (const auto &param : stmt.params()) {
             if (param.has_value()) {
-                invoc(param.value());
+                params.push_back(param.value().c_str());
             } else {
-                invoc(static_cast<const char *>(nullptr));
+                params.push_back(nullptr);
             }
         }
 
-        auto result = invoc.exec();
+        pqxx::result result = txn.exec_prepared(stmt.name(), params.data(), params.data() + params.size());
         txn.commit();
 
         if constexpr (std::is_same_v<Struct, NothingRow>) {
@@ -85,6 +85,7 @@ private:
 
         return PgRowMapper<Struct>::map(result[0]);
     }
+
 
     boost::asio::thread_pool &pool_;
     pqxx::connection connection_;

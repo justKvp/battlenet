@@ -11,6 +11,26 @@ void ClientSession::start() {
     read_header();
 }
 
+template <typename Func>
+void ClientSession::post(Func&& func) {
+    auto self = shared_from_this();
+    boost::asio::post(server_->thread_pool(), [self, func = std::forward<Func>(func)] {
+        func();
+    });
+}
+
+template <typename Func>
+void ClientSession::spawn(Func&& func) {
+    auto self = shared_from_this();
+    boost::asio::co_spawn(
+            socket_.get_executor(),
+            [self, func = std::forward<Func>(func)] {
+                return func();
+            },
+            boost::asio::detached
+    );
+}
+
 void ClientSession::read_header() {
     header_buffer_.resize(2);
     auto self = shared_from_this();
