@@ -19,13 +19,12 @@ public:
 
     void close();
 
-    // Позволяет запускать задачи в thread_pool сервера, не блокируя основной поток - в виде корутины
+    // Асинхронная и блокирующая обёртки
     template<typename Func>
-    void async_query(Func &&func);
+    void async_query(Func&& func);
 
-    // Блокирует поток, до выполнения этого кода
     template<typename Func>
-    void blocking_query(Func &&func);
+    void blocking_query(Func&& func);
 
 private:
     void read_header();
@@ -45,4 +44,5 @@ private:
 
     std::deque<std::vector<uint8_t>> write_queue_;
     bool writing_ = false;
+    std::atomic<bool> closed_{false};
 };

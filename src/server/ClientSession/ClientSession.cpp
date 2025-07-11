@@ -12,34 +12,42 @@ void ClientSession::start() {
 }
 
 void ClientSession::close() {
-    if (socket_.is_open()) {
-        boost::system::error_code ignored_ec;
-        socket_.shutdown(tcp::socket::shutdown_both, ignored_ec);
-        socket_.close(ignored_ec);
+    if (closed_.exchange(true)) {
+        // Уже закрыто другим потоком/корутиной
+        return;
     }
+
+    boost::system::error_code ec;
+
+    if (socket_.is_open()) {
+        socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        socket_.close(ec);
+    }
+
     if (server_) {
         server_->remove_session(shared_from_this());
     }
 }
 
 template<typename Func>
-void ClientSession::async_query(Func &&func) {
+void ClientSession::async_query(Func&& func) {
     auto self = shared_from_this();
     boost::asio::co_spawn(
             socket_.get_executor(),
-            [self, func = std::forward<Func>(func)] {
-                return func();
-            },
+            std::forward<Func>(func),
             boost::asio::detached
     );
 }
 
 template<typename Func>
-void ClientSession::blocking_query(Func &&func) {
+void ClientSession::blocking_query(Func&& func) {
     auto self = shared_from_this();
-    boost::asio::post(server_->thread_pool(), [self, func = std::forward<Func>(func)] {
-        func();
-    });
+    boost::asio::post(
+            server_->thread_pool(),
+            [self, func = std::forward<Func>(func)] {
+                func();
+            }
+    );
 }
 
 void ClientSession::read_header() {
