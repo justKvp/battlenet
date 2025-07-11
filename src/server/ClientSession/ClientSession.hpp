@@ -18,10 +18,11 @@ public:
     void start();
     void close();
 
-    // Позволяет запускать задачи в thread_pool сервера
+    // Позволяет запускать задачи в thread_pool сервера, не блокируя основной поток - в виде корутины
     template <typename Func>
     void async_query(Func&& func);
 
+    // Блокирует поток, до выполнения этого кода
     template <typename Func>
     void blocking_query(Func&& func);
 
