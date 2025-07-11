@@ -122,10 +122,11 @@ void ClientSession::handle_packet(Packet &packet) {
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, 1);
 
-                    UserRow user = co_await self->server_->db()->Async.execute_prepared<UserRow>(stmt);
-
-                    std::cout << "[Server][Async] id: " << user.id
-                              << ", name: " << user.name << "\n";
+                    auto user = co_await self->server_->db()->Async.execute_prepared<UserRow>(stmt);
+                    if (user) {
+                        std::cout << "[Server][Async] id: " << user->id
+                                  << ", name: " << user->name << "\n";
+                    }
 
                     Packet resp;
                     resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
@@ -150,10 +151,11 @@ void ClientSession::handle_packet(Packet &packet) {
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, 2);
 
-                    UserRow user = self->server_->db()->Sync.execute_prepared<UserRow>(stmt);
-
-                    std::cout << "[Server][Sync] id: " << user.id
-                              << ", name: " << user.name << "\n";
+                    auto user = self->server_->db()->Sync.execute_prepared<UserRow>(stmt);
+                    if (user) {
+                        std::cout << "[Server][Sync] id: " << user->id
+                                  << ", name: " << user->name << "\n";
+                    }
 
                     Packet resp;
                     resp.opcode = Opcode::SMSG_DATABASE_SYNC_EXAMPLE;

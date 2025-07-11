@@ -9,6 +9,7 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 #include <future>
+#include <optional>
 #include <type_traits>
 
 using boost::asio::awaitable;
@@ -25,7 +26,7 @@ public:
         txn.commit();
     }
 
-    boost::asio::thread_pool& thread_pool() { return pool_; }
+    boost::asio::thread_pool &thread_pool() { return pool_; }
 
     struct AsyncAPI {
         Database &db;
@@ -39,7 +40,7 @@ public:
         }
 
         template<typename Struct>
-        awaitable<Struct> execute_prepared(PreparedStatement stmt) {
+        awaitable<std::optional<Struct>> execute_prepared(PreparedStatement stmt) {
             co_return co_await async_db_call([this, stmt = std::move(stmt)] {
                 return db.execute_prepared_sync<Struct>(stmt);
             });
@@ -50,7 +51,7 @@ public:
         Database &db;
 
         template<typename Struct>
-        Struct execute_prepared(PreparedStatement stmt) {
+        std::optional<Struct> execute_prepared(PreparedStatement stmt) {
             return db.execute_prepared_sync<Struct>(stmt);
         }
     };
@@ -60,32 +61,31 @@ public:
 
 private:
     template<typename Struct>
-    Struct execute_prepared_sync(PreparedStatement stmt) {
+    std::optional<Struct> execute_prepared_sync(PreparedStatement stmt) {
         pqxx::work txn(connection_);
+        auto invoc = txn.prepared(stmt.name());
 
-        std::vector<const char*> params;
         for (const auto &param : stmt.params()) {
             if (param.has_value()) {
-                params.push_back(param.value().c_str());
+                invoc(param.value());
             } else {
-                params.push_back(nullptr);
+                invoc(static_cast<const char *>(nullptr));
             }
         }
 
-        pqxx::result result = txn.exec_prepared(stmt.name(), params.data(), params.data() + params.size());
+        auto result = invoc.exec();
         txn.commit();
 
         if constexpr (std::is_same_v<Struct, NothingRow>) {
-            return {};
+            return Struct{};  // для пустых запросов — UPDATE и т.д.
         }
 
         if (result.empty()) {
-            throw std::runtime_error("No rows found");
+            return std::nullopt;  // ничего не найдено
         }
 
         return PgRowMapper<Struct>::map(result[0]);
     }
-
 
     boost::asio::thread_pool &pool_;
     pqxx::connection connection_;

@@ -13,7 +13,7 @@ int main() {
         boost::asio::thread_pool pool(network_threads);
 
         // 🟢 Инициализируем базу данных (передаём тот же пул!)
-        auto db = std::make_shared<Database>(pool, "host=localhost user=postgres password=123 dbname=test");
+        auto db = std::make_shared<Database>(pool, "host=185.185.59.232:58995 user=postgres password=postgres dbname=postgres");
 
         // Сервер получает ссылку на pool и готовую БД
         auto server = std::make_shared<Server>(pool.get_executor(), db, port);
