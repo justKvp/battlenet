@@ -127,15 +127,15 @@ void ClientSession::handle_packet(Packet &packet) {
                     std::cout << "[Server][Async] id: " << user.id
                               << ", name: " << user.name << "\n";
 
+                    Packet resp;
+                    resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
+                    self->send_packet(resp);
+
                 } catch (const std::exception &ex) {
                     std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
                 }
                 co_return;
             });
-
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
-            send_packet(resp);
 
             break;
         }
@@ -155,14 +155,15 @@ void ClientSession::handle_packet(Packet &packet) {
                     std::cout << "[Server][Sync] id: " << user.id
                               << ", name: " << user.name << "\n";
 
+                    Packet resp;
+                    resp.opcode = Opcode::SMSG_DATABASE_SYNC_EXAMPLE;
+                    self->send_packet(resp);
+
                 } catch (const std::exception &ex) {
                     std::cerr << "[Server] Sync DB error: " << ex.what() << "\n";
                 }
             });
 
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_SYNC_EXAMPLE;
-            send_packet(resp);
             break;
         }
         case Opcode::CMSG_DATABASE_ASYNC_UPDATE: {
@@ -177,15 +178,16 @@ void ClientSession::handle_packet(Packet &packet) {
                     stmt.set_param(0, 1);
                     co_await self->server_->db()->Async.execute_prepared<NothingRow>(stmt);
 
+                    Packet resp;
+                    resp.opcode = Opcode::SMSG_DATABASE_ASYNC_UPDATE;
+                    self->send_packet(resp);
+
                 } catch (const std::exception &ex) {
                     std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
                 }
                 co_return;
             });
 
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_ASYNC_UPDATE;
-            send_packet(resp);
             break;
         }
         default:
