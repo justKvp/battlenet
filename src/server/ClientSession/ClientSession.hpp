@@ -21,10 +21,12 @@ public:
 
     // Асинхронная и блокирующая обёртки
     template<typename Func>
-    void async_query(Func&& func);
+    void async_query(Func &&func);
 
     template<typename Func>
-    void blocking_query(Func&& func);
+    void blocking_query(Func &&func);
+
+    bool isOpened() { return closed_; }
 
 private:
     void read_header();

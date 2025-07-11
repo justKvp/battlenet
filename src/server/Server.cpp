@@ -46,9 +46,10 @@ void Server::stop() {
 
     {
         std::lock_guard<std::mutex> lock(sessions_mutex_);
-//        for (auto &session : sessions_) {
-//            session->close();
-//        }
+        for (auto &session : sessions_) {
+            if (session->isOpened())
+                session->close();
+        }
         sessions_.clear();
     }
 
