@@ -93,12 +93,14 @@ void Client::send_async_select_user_by_id(const uint64_t &id) {
     Packet p;
     p.opcode = Opcode::CMSG_DATABASE_ASYNC_EXAMPLE;
     p.buffer.write_uint64(id);
+    send_packet(p);
 }
 
 void Client::send_sync_select_user_by_id(const uint64_t &id) {
     Packet p;
     p.opcode = Opcode::CMSG_DATABASE_SYNC_EXAMPLE;
     p.buffer.write_uint64(id);
+    send_packet(p);
 }
 
 void Client::send_async_update_user_name_by_id(const uint64_t &id, const std::string &name) {
@@ -106,6 +108,7 @@ void Client::send_async_update_user_name_by_id(const uint64_t &id, const std::st
     p.opcode = Opcode::CMSG_DATABASE_ASYNC_UPDATE;
     p.buffer.write_uint64(id);
     p.buffer.write_string(name);
+    send_packet(p);
 }
 
 void Client::send_packet(const Packet& packet) {
