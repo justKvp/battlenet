@@ -1,3 +1,5 @@
+// ✅ Итоговая версия Database с пулом соединений, реконнектом и корректным закрытием
+
 #pragma once
 
 #include "PreparedStatement.hpp"
@@ -32,9 +34,17 @@ public:
     }
 
     ~Database() {
+        shutdown();
+    }
+
+    void shutdown() {
         std::lock_guard<std::mutex> lock(mutex_);
         while (!connections_.empty()) {
-            connections_.front()->disconnect();
+            auto &c = connections_.front();
+            if (c && c->is_open()) {
+                c->disconnect();
+                std::cout << "[Database] Connection closed.\n";
+            }
             connections_.pop();
         }
     }
@@ -60,7 +70,6 @@ public:
 
             co_return fut.get();
         }
-
 
         template <typename Struct>
         awaitable<std::optional<Struct>> execute(PreparedStatement stmt) {

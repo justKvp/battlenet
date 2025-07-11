@@ -53,6 +53,11 @@ void Server::stop() {
         sessions_.clear();
     }
 
+    // ✅ Корректно закрываем все DB connections:
+    if (db_) {
+        db_->shutdown();
+    }
+
     log_session_count();
 }
 
