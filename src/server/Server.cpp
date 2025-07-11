@@ -10,8 +10,7 @@ Server::Server(boost::asio::any_io_executor executor,
                int port)
         : executor_(executor),
           acceptor_(executor, tcp::endpoint(tcp::v4(), port)),
-          db_(std::move(db))
-{
+          db_(std::move(db)) {
     // Прямо при создании — начинаем accept
     start_accept();
 }
@@ -54,7 +53,7 @@ void Server::stop() {
     }
 
     std::lock_guard<std::mutex> lock(sessions_mutex_);
-    for (auto& session : sessions_) {
+    for (auto &session: sessions_) {
         session->close();
     }
     sessions_.clear();

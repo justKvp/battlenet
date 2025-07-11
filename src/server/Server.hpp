@@ -17,13 +17,15 @@ public:
            int port);
 
     void start_accept();
+
     void stop();
 
     void remove_session(std::shared_ptr<ClientSession> session);
+
     void log_session_count();
 
     // Доступ к общему thread_pool через Database
-    boost::asio::thread_pool& thread_pool() { return db_->thread_pool(); }
+    boost::asio::thread_pool &thread_pool() { return db_->thread_pool(); }
 
     // Доступ к БД
     std::shared_ptr<Database> db() { return db_; }

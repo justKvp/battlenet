@@ -11,16 +11,19 @@ void ClientSession::start() {
     read_header();
 }
 
-template <typename Func>
-void ClientSession::post(Func&& func) {
-    auto self = shared_from_this();
-    boost::asio::post(server_->thread_pool(), [self, func = std::forward<Func>(func)] {
-        func();
-    });
+void ClientSession::close() {
+    if (socket_.is_open()) {
+        boost::system::error_code ignored_ec;
+        socket_.shutdown(tcp::socket::shutdown_both, ignored_ec);
+        socket_.close(ignored_ec);
+    }
+    if (server_) {
+        server_->remove_session(shared_from_this());
+    }
 }
 
-template <typename Func>
-void ClientSession::spawn(Func&& func) {
+template<typename Func>
+void ClientSession::async_query(Func &&func) {
     auto self = shared_from_this();
     boost::asio::co_spawn(
             socket_.get_executor(),
@@ -29,6 +32,14 @@ void ClientSession::spawn(Func&& func) {
             },
             boost::asio::detached
     );
+}
+
+template<typename Func>
+void ClientSession::blocking_query(Func &&func) {
+    auto self = shared_from_this();
+    boost::asio::post(server_->thread_pool(), [self, func = std::forward<Func>(func)] {
+        func();
+    });
 }
 
 void ClientSession::read_header() {
@@ -218,13 +229,3 @@ void ClientSession::do_write() {
                              });
 }
 
-void ClientSession::close() {
-    if (socket_.is_open()) {
-        boost::system::error_code ignored_ec;
-        socket_.shutdown(tcp::socket::shutdown_both, ignored_ec);
-        socket_.close(ignored_ec);
-    }
-    if (server_) {
-        server_->remove_session(shared_from_this());
-    }
-}

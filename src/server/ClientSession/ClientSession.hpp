@@ -16,21 +16,26 @@ public:
     ClientSession(boost::asio::ip::tcp::socket socket, std::shared_ptr<Server> server);
 
     void start();
+
     void close();
 
     // Позволяет запускать задачи в thread_pool сервера, не блокируя основной поток - в виде корутины
-    template <typename Func>
-    void async_query(Func&& func);
+    template<typename Func>
+    void async_query(Func &&func);
 
     // Блокирует поток, до выполнения этого кода
-    template <typename Func>
-    void blocking_query(Func&& func);
+    template<typename Func>
+    void blocking_query(Func &&func);
 
 private:
     void read_header();
+
     void read_body(std::size_t size);
-    void handle_packet(Packet& packet);
-    void send_packet(const Packet& packet);
+
+    void handle_packet(Packet &packet);
+
+    void send_packet(const Packet &packet);
+
     void do_write();
 
     boost::asio::ip::tcp::socket socket_;
