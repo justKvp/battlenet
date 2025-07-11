@@ -18,6 +18,12 @@ public:
 
     void send_hello(const std::string &msg, const uint8_t &number, const float &value);
 
+    void send_async_select_user_by_id(const uint64_t &id);
+
+    void send_sync_select_user_by_id(const uint64_t &id);
+
+    void send_async_update_user_name_by_id(const uint64_t &id, const std::string &name);
+
 private:
 
     void schedule_reconnect();

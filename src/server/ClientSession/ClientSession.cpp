@@ -114,13 +114,15 @@ void ClientSession::handle_packet(Packet &packet) {
         case Opcode::CMSG_DATABASE_ASYNC_EXAMPLE: {
             std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
                       << "] CMSG_DATABASE_ASYNC_EXAMPLE\n";
+            uint64_t id = packet.buffer.read_uint64();
 
             // АСИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
-            async_query([self]() -> boost::asio::awaitable<void> {
+            async_query([self, id]() -> boost::asio::awaitable<void> {
                 try {
+
                     PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
-                    stmt.set_param(0, 1);
+                    stmt.set_param(0, id);
 
                     auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
                     if (user) {
@@ -143,13 +145,14 @@ void ClientSession::handle_packet(Packet &packet) {
         case Opcode::CMSG_DATABASE_SYNC_EXAMPLE: {
             std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
                       << "] CMSG_DATABASE_SYNC_EXAMPLE\n";
+            uint64_t id = packet.buffer.read_uint64();
 
             // СИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
-            blocking_query([self]() {
+            blocking_query([self, id]() {
                 try {
                     PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
-                    stmt.set_param(0, 2);
+                    stmt.set_param(0, id);
 
                     auto user = self->server_->db()->Sync.execute<UserRow>(stmt);
                     if (user) {
@@ -171,14 +174,16 @@ void ClientSession::handle_packet(Packet &packet) {
         case Opcode::CMSG_DATABASE_ASYNC_UPDATE: {
             std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
                       << "] CMSG_DATABASE_ASYNC_UPDATE\n";
+            uint64_t id = packet.buffer.read_uint64();
+            std::string msg = packet.buffer.read_string();
 
             // Асинхронный без возврата значений
             auto self = shared_from_this();
-            async_query([self]() -> boost::asio::awaitable<void> {
+            async_query([self, id, msg]() -> boost::asio::awaitable<void> {
                 try {
                     PreparedStatement stmt("UPDATE users SET name = $1 WHERE id = $2");
-                    stmt.set_param(0, "Alice_test");
-                    stmt.set_param(1, 1);
+                    stmt.set_param(0, msg);
+                    stmt.set_param(1, id);
                     co_await self->server_->db()->Async.execute<NothingRow>(stmt);
 
                     Packet resp;

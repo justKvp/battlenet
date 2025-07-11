@@ -89,6 +89,25 @@ void Client::send_hello(const std::string &msg, const uint8_t &number, const flo
     send_packet(p);
 }
 
+void Client::send_async_select_user_by_id(const uint64_t &id) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_ASYNC_EXAMPLE;
+    p.buffer.write_uint64(id);
+}
+
+void Client::send_sync_select_user_by_id(const uint64_t &id) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_SYNC_EXAMPLE;
+    p.buffer.write_uint64(id);
+}
+
+void Client::send_async_update_user_name_by_id(const uint64_t &id, const std::string &name) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_ASYNC_UPDATE;
+    p.buffer.write_uint64(id);
+    p.buffer.write_string(name);
+}
+
 void Client::send_packet(const Packet& packet) {
     std::vector<uint8_t> body = packet.serialize();
 
