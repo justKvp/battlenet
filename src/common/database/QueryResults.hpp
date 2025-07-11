@@ -7,7 +7,7 @@
 // Результаты
 // ======================
 struct UserRow {
-    int32_t id;
+    int64_t id;
     std::string name;
 };
 
@@ -24,7 +24,7 @@ template<>
 struct PgRowMapper<UserRow> {
     static UserRow map(const pqxx::row &row) {
         return UserRow{
-                .id = row[0].as<int32_t>(),
+                .id = row[0].as<int64_t>(),
                 .name = row[1].as<std::string>()
         };
     }
