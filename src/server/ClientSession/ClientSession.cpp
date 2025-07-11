@@ -48,11 +48,10 @@ void ClientSession::read_header() {
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
                             [this, self](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
-                                    if (ec == boost::asio::error::eof) {
+                                    if (ec == boost::asio::error::operation_aborted) {
                                         std::cout << "[Server] Client disconnected\n";
-                                    } else {
-                                        std::cerr << "[Server] Header read failed: " << ec.message() << "\n";
                                     }
+                                    std::cerr << "[Server] Header read failed: " << ec.message() << "\n";
                                     close();
                                     return;
                                 }
@@ -67,7 +66,7 @@ void ClientSession::read_body(std::size_t size) {
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
                             [this, self](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
-                                    if (ec == boost::asio::error::eof) {
+                                    if (ec == boost::asio::error::operation_aborted) {
                                         std::cout << "[Server] Client disconnected\n";
                                     } else {
                                         std::cerr << "[Server] Body read failed: " << ec.message() << "\n";
@@ -83,7 +82,7 @@ void ClientSession::read_body(std::size_t size) {
                                     std::cerr << "[Server] Packet deserialization failed: " << ex.what() << "\n";
                                 }
 
-                                read_header(); // Слушаем дальше
+                                read_header();  // Ждём следующий пакет
                             });
 }
 
@@ -230,6 +229,9 @@ void ClientSession::do_write() {
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t) {
                                  if (ec) {
+                                     if (ec == boost::asio::error::operation_aborted) {
+                                         return;
+                                     }
                                      std::cerr << "[Server] Write failed: " << ec.message() << "\n";
                                      close();
                                      return;
