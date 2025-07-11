@@ -121,7 +121,7 @@ void ClientSession::handle_packet(Packet &packet) {
             async_query([self, id]() -> boost::asio::awaitable<void> {
                 try {
 
-                    PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
+                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, id);
 
                     auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
@@ -151,7 +151,7 @@ void ClientSession::handle_packet(Packet &packet) {
             auto self = shared_from_this();
             blocking_query([self, id]() {
                 try {
-                    PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
+                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, id);
 
                     auto user = self->server_->db()->Sync.execute<UserRow>(stmt);
@@ -181,7 +181,7 @@ void ClientSession::handle_packet(Packet &packet) {
             auto self = shared_from_this();
             async_query([self, id, msg]() -> boost::asio::awaitable<void> {
                 try {
-                    PreparedStatement stmt("UPDATE users SET name = $1 WHERE id = $2");
+                    PreparedStatement stmt("UPDATE_SOMETHING");
                     stmt.set_param(0, msg);
                     stmt.set_param(1, id);
                     co_await self->server_->db()->Async.execute<NothingRow>(stmt);

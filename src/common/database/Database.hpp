@@ -9,26 +9,45 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 #include <future>
-#include <type_traits>
 #include <optional>
+#include <type_traits>
 
 using boost::asio::awaitable;
 
 class Database {
 public:
     Database(boost::asio::thread_pool &pool, const std::string &conninfo)
-            : pool_(pool), connection_(conninfo) {}
+            : pool_(pool), connection_(conninfo) {
+        // 🔒 Регистрируем подготовленные запросы один раз
+        pqxx::work txn(connection_);
+        connection_.prepare("LOGIN_SEL_ACCOUNT_BY_ID",
+                            "SELECT id, name FROM users WHERE id = $1");
+        connection_.prepare("UPDATE_SOMETHING",
+                            "UPDATE users SET name = $1 WHERE id = $2");
+        txn.commit();
+    }
 
     boost::asio::thread_pool &thread_pool() { return pool_; }
 
+    // ============================
+    // === Асинхронный интерфейс ===
+    // ============================
     struct AsyncAPI {
         Database &db;
 
         template <typename Func, typename ResultType = typename std::invoke_result_t<Func>>
         awaitable<ResultType> async_db_call(Func &&func) {
-            std::packaged_task<ResultType()> task(std::forward<Func>(func));
-            auto fut = task.get_future();
-            boost::asio::post(db.pool_, std::move(task));
+            std::promise<ResultType> promise;
+            auto fut = promise.get_future();
+
+            boost::asio::post(db.pool_, [func = std::forward<Func>(func), promise = std::move(promise)]() mutable {
+                try {
+                    promise.set_value(func());
+                } catch (...) {
+                    promise.set_exception(std::current_exception());
+                }
+            });
+
             co_return fut.get();
         }
 
@@ -40,6 +59,9 @@ public:
         }
     };
 
+    // ============================
+    // === Синхронный интерфейс ===
+    // ============================
     struct SyncAPI {
         Database &db;
 
@@ -57,6 +79,7 @@ private:
     std::optional<Struct> execute_sync(const PreparedStatement &stmt) {
         pqxx::work txn(connection_);
 
+        // 🔒 Используем prepared invocation
         auto invoc = txn.prepared(stmt.name());
         for (const auto &param : stmt.params()) {
             if (param.has_value()) {
@@ -79,7 +102,6 @@ private:
 
         return PgRowMapper<Struct>::map(result[0]);
     }
-
 
     boost::asio::thread_pool &pool_;
     pqxx::connection connection_;
