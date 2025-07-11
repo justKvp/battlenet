@@ -30,7 +30,7 @@ void ClientSession::close() {
 }
 
 template<typename Func>
-void ClientSession::async_query(Func&& func) {
+void ClientSession::async_query(Func &&func) {
     auto self = shared_from_this();
     boost::asio::co_spawn(
             socket_.get_executor(),
@@ -40,7 +40,7 @@ void ClientSession::async_query(Func&& func) {
 }
 
 template<typename Func>
-void ClientSession::blocking_query(Func&& func) {
+void ClientSession::blocking_query(Func &&func) {
     auto self = shared_from_this();
     boost::asio::post(
             server_->thread_pool(),
@@ -58,8 +58,11 @@ void ClientSession::read_header() {
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
                                         std::cout << "[Server] Client disconnected\n";
+                                    } else if (ec == boost::asio::error::eof) {
+                                        std::cout << "[Server] Client closed connection normally (EOF)\n";
+                                    } else {
+                                        std::cerr << "[Server] Header read failed: " << ec.message() << "\n";
                                     }
-                                    std::cerr << "[Server] Header read failed: " << ec.message() << "\n";
                                     close();
                                     return;
                                 }
@@ -76,6 +79,8 @@ void ClientSession::read_body(std::size_t size) {
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
                                         std::cout << "[Server] Client disconnected\n";
+                                    } else if (ec == boost::asio::error::eof) {
+                                        std::cout << "[Server] Client closed connection normally (EOF)\n";
                                     } else {
                                         std::cerr << "[Server] Body read failed: " << ec.message() << "\n";
                                     }
