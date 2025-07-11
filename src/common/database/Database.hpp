@@ -9,29 +9,22 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 #include <future>
-#include <optional>
 #include <type_traits>
+#include <optional>
 
 using boost::asio::awaitable;
 
 class Database {
 public:
     Database(boost::asio::thread_pool &pool, const std::string &conninfo)
-            : pool_(pool), connection_(conninfo) {
-        pqxx::work txn(connection_);
-        connection_.prepare("LOGIN_SEL_ACCOUNT_BY_ID",
-                            "SELECT id, name FROM users WHERE id = $1");
-        connection_.prepare("UPDATE_SOMETHING",
-                            "UPDATE users SET name = $1 WHERE id = $2");
-        txn.commit();
-    }
+            : pool_(pool), connection_(conninfo) {}
 
     boost::asio::thread_pool &thread_pool() { return pool_; }
 
     struct AsyncAPI {
         Database &db;
 
-        template<typename Func, typename ResultType = typename std::invoke_result_t<Func>>
+        template <typename Func, typename ResultType = typename std::invoke_result_t<Func>>
         awaitable<ResultType> async_db_call(Func &&func) {
             std::packaged_task<ResultType()> task(std::forward<Func>(func));
             auto fut = task.get_future();
@@ -39,10 +32,10 @@ public:
             co_return fut.get();
         }
 
-        template<typename Struct>
-        awaitable<std::optional<Struct>> execute_prepared(PreparedStatement stmt) {
+        template <typename Struct>
+        awaitable<std::optional<Struct>> execute(PreparedStatement stmt) {
             co_return co_await async_db_call([this, stmt = std::move(stmt)] {
-                return db.execute_prepared_sync<Struct>(stmt);
+                return db.execute_sync<Struct>(stmt);
             });
         }
     };
@@ -50,9 +43,9 @@ public:
     struct SyncAPI {
         Database &db;
 
-        template<typename Struct>
-        std::optional<Struct> execute_prepared(PreparedStatement stmt) {
-            return db.execute_prepared_sync<Struct>(stmt);
+        template <typename Struct>
+        std::optional<Struct> execute(PreparedStatement stmt) {
+            return db.execute_sync<Struct>(stmt);
         }
     };
 
@@ -60,11 +53,11 @@ public:
     SyncAPI Sync{*this};
 
 private:
-    template<typename Struct>
-    std::optional<Struct> execute_prepared_sync(PreparedStatement stmt) {
+    template <typename Struct>
+    std::optional<Struct> execute_sync(const PreparedStatement &stmt) {
         pqxx::work txn(connection_);
-        auto invoc = txn.prepared(stmt.name());
 
+        auto invoc = txn.prepared(stmt.name());
         for (const auto &param : stmt.params()) {
             if (param.has_value()) {
                 invoc(param.value());
@@ -73,19 +66,20 @@ private:
             }
         }
 
-        auto result = invoc.exec();
+        pqxx::result result = invoc.exec();
         txn.commit();
 
         if constexpr (std::is_same_v<Struct, NothingRow>) {
-            return Struct{};  // для пустых запросов — UPDATE и т.д.
+            return Struct{};
         }
 
         if (result.empty()) {
-            return std::nullopt;  // ничего не найдено
+            return std::nullopt;
         }
 
         return PgRowMapper<Struct>::map(result[0]);
     }
+
 
     boost::asio::thread_pool &pool_;
     pqxx::connection connection_;

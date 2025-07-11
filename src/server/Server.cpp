@@ -11,8 +11,6 @@ Server::Server(boost::asio::any_io_executor executor,
         : executor_(executor),
           acceptor_(executor, tcp::endpoint(tcp::v4(), port)),
           db_(std::move(db)) {
-    // Прямо при создании — начинаем accept
-    start_accept();
 }
 
 void Server::start_accept() {

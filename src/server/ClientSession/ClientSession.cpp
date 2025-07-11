@@ -119,10 +119,10 @@ void ClientSession::handle_packet(Packet &packet) {
             auto self = shared_from_this();
             async_query([self]() -> boost::asio::awaitable<void> {
                 try {
-                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
+                    PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
                     stmt.set_param(0, 1);
 
-                    auto user = co_await self->server_->db()->Async.execute_prepared<UserRow>(stmt);
+                    auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
                     if (user) {
                         std::cout << "[Server][Async] id: " << user->id
                                   << ", name: " << user->name << "\n";
@@ -148,10 +148,10 @@ void ClientSession::handle_packet(Packet &packet) {
             auto self = shared_from_this();
             blocking_query([self]() {
                 try {
-                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
+                    PreparedStatement stmt("SELECT id, name FROM users WHERE id = $1");
                     stmt.set_param(0, 2);
 
-                    auto user = self->server_->db()->Sync.execute_prepared<UserRow>(stmt);
+                    auto user = self->server_->db()->Sync.execute<UserRow>(stmt);
                     if (user) {
                         std::cout << "[Server][Sync] id: " << user->id
                                   << ", name: " << user->name << "\n";
@@ -176,9 +176,10 @@ void ClientSession::handle_packet(Packet &packet) {
             auto self = shared_from_this();
             async_query([self]() -> boost::asio::awaitable<void> {
                 try {
-                    PreparedStatement stmt("UPDATE_SOMETHING");
-                    stmt.set_param(0, 1);
-                    co_await self->server_->db()->Async.execute_prepared<NothingRow>(stmt);
+                    PreparedStatement stmt("UPDATE users SET name = $1 WHERE id = $2");
+                    stmt.set_param(0, "Alice_test");
+                    stmt.set_param(1, 1);
+                    co_await self->server_->db()->Async.execute<NothingRow>(stmt);
 
                     Packet resp;
                     resp.opcode = Opcode::SMSG_DATABASE_ASYNC_UPDATE;
