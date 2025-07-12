@@ -13,80 +13,41 @@ cmake ..
 
 make -j 4             (or another threads count)
 
+## Пример использования асинхронного запроса в обработчике опкода
 
+Код заворачивается в лямбду, после чего отправляется на обработку в отдельный вызываемый поток из thread pool в виде корутины
 
+```
 case Opcode::CMSG_DATABASE_ASYNC_EXAMPLE: {
-std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
-<< "] CMSG_DATABASE_ASYNC_EXAMPLE\n";
+            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
+                      << "] CMSG_DATABASE_ASYNC_EXAMPLE\n";
+            uint64_t id = packet.buffer.read_uint64();
 
             // АСИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
-            spawn([self]() -> boost::asio::awaitable<void> {
+            async_query([self, id]() -> boost::asio::awaitable<void> {
                 try {
+
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
-                    stmt.set_param(0, 1);
+                    stmt.set_param(0, id);
 
-                    UserRow user = co_await self->server_->db().Async.execute_prepared<UserRow>(stmt);
+                    auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
+                    if (user) {
+                        std::cout << "[Server][Async] id: " << user->id
+                                  << ", name: " << user->name << "\n";
+                    }
 
-                    std::cout << "[Server][Async] id: " << user.id
-                              << ", name: " << user.name << "\n";
+                    Packet resp;
+                    resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
+                    self->send_packet(resp);
 
-                } catch (const std::exception& ex) {
+                } catch (const std::exception &ex) {
                     std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
                 }
                 co_return;
             });
 
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
-            send_packet(resp);
-
             break;
         }
-        case Opcode::CMSG_DATABASE_SYNC_EXAMPLE: {
-            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode) << "] CMSG_DATABASE_SYNC_EXAMPLE\n";
+```
 
-            // СИНХРОННЫЙ ЗАПРОС
-            auto self = shared_from_this();
-            post([self]() {
-                try {
-                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
-                    stmt.set_param(0, 2);
-
-                    UserRow user = self->server_->db().Sync.execute_prepared<UserRow>(stmt);
-
-                    std::cout << "[Server][Sync] id: " << user.id
-                              << ", name: " << user.name << "\n";
-
-                } catch (const std::exception& ex) {
-                    std::cerr << "[Server] Sync DB error: " << ex.what() << "\n";
-                }
-            });
-
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_SYNC_EXAMPLE;
-            send_packet(resp);
-            break;
-        }
-        case Opcode::CMSG_DATABASE_ASYNC_UPDATE: {
-            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode) << "] CMSG_DATABASE_ASYNC_UPDATE\n";
-
-            // Асинхронный без возврата значений
-            auto self = shared_from_this();
-            spawn([self]() -> boost::asio::awaitable<void> {
-                try {
-                    PreparedStatement stmt("UPDATE_SOMETHING");
-                    stmt.set_param(0, 1);
-                    co_await self->server_->db().Async.execute_prepared<NothingRow>(stmt);
-
-                } catch (const std::exception& ex) {
-                    std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
-                }
-                co_return;
-            });
-
-            Packet resp;
-            resp.opcode = Opcode::SMSG_DATABASE_ASYNC_UPDATE;
-            send_packet(resp);
-            break;
-        }
