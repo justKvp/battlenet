@@ -1,10 +1,15 @@
-#include "server/Server.hpp"
-#include "Database.hpp"
 #include <boost/asio.hpp>
 #include <iostream>
 #include <csignal>
 
+#include "Database.hpp"
+#include "Logger.hpp"
+#include "server/Server.hpp"
+
 int main() {
+    Logger::init_thread_pool();  // Инициализировать thread pool до первого лога!
+    auto log = Logger::get();
+
     try {
         unsigned int network_threads = 4;
         int port = 12345;
@@ -20,12 +25,12 @@ int main() {
 
         server->start_accept();
 
-        std::cout << "[Server] Running on port " << port << "\n";
+        log->info("[Server] Running on port {}!", port);
 
         // Перехват SIGINT/SIGTERM
         boost::asio::signal_set signals(pool.get_executor(), SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int signal_number) {
-            std::cout << "[Server] Signal " << signal_number << " received, shutting down...\n";
+            log->info("[Server] Signal {} received, shutting down...", signal_number);
             server->stop();
             pool.stop();
         });
@@ -33,10 +38,10 @@ int main() {
         // Запускаем все worker-потоки
         pool.join();
 
-        std::cout << "[Server] Gracefully shut down.\n";
+        log->info("[Server] Gracefully shut down.");
 
     } catch (const std::exception& e) {
-        std::cerr << "[Server] Exception: " << e.what() << "\n";
+        log->error("[Server] Exception: {}", e.what());
     }
 
     return 0;

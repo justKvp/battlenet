@@ -1,5 +1,6 @@
 #include "ClientSession.hpp"
 #include "QueryResults.hpp"
+#include "Logger.hpp"
 #include <iostream>
 
 using boost::asio::ip::tcp;
@@ -55,13 +56,14 @@ void ClientSession::read_header() {
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
                             [this, self](boost::system::error_code ec, std::size_t) {
+                                auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
-                                        std::cout << "[Server] Client disconnected\n";
+                                        log->info("[client_session] Client disconnected");
                                     } else if (ec == boost::asio::error::eof) {
-                                        std::cout << "[Server] Client closed connection normally (EOF)\n";
+                                        log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
-                                        std::cerr << "[Server] Header read failed: " << ec.message() << "\n";
+                                        log->error("[client_session] Header read failed {}", ec.message());
                                     }
                                     close();
                                     return;
@@ -76,13 +78,14 @@ void ClientSession::read_body(std::size_t size) {
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
                             [this, self](boost::system::error_code ec, std::size_t) {
+                                auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
-                                        std::cout << "[Server] Client disconnected\n";
+                                        log->info("[client_session] Client disconnected");
                                     } else if (ec == boost::asio::error::eof) {
-                                        std::cout << "[Server] Client closed connection normally (EOF)\n";
+                                        log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
-                                        std::cerr << "[Server] Body read failed: " << ec.message() << "\n";
+                                        log->error("[client_session] Body read failed {}", ec.message());
                                     }
                                     close();
                                     return;
@@ -92,7 +95,7 @@ void ClientSession::read_body(std::size_t size) {
                                     Packet packet = Packet::deserialize(body_buffer_);
                                     handle_packet(packet);
                                 } catch (const std::exception &ex) {
-                                    std::cerr << "[Server] Packet deserialization failed: " << ex.what() << "\n";
+                                    log->info("[client_session] Packet deserialization failed {}", ex.what());
                                 }
 
                                 read_header();  // Ждём следующий пакет
@@ -100,14 +103,15 @@ void ClientSession::read_body(std::size_t size) {
 }
 
 void ClientSession::handle_packet(Packet &packet) {
+    auto log = Logger::get();
     switch (packet.opcode) {
         case Opcode::MESSAGE: {
             std::string msg = packet.buffer.read_string();
-            std::cout << "[Server] Message: " << msg << "\n";
+            log->debug("[client_session] opcode[{}, MESSAGE], Message: {}", static_cast<int>(packet.opcode), msg);
             break;
         }
         case Opcode::CMSG_PING: {
-            std::cout << "[Server] CMSG_PING received\n";
+            log->debug("[client_session] opcode[{}, CMSG_PING]", static_cast<int>(packet.opcode));
             Packet pong;
             pong.opcode = Opcode::SMSG_PONG;
             send_packet(pong);
@@ -115,7 +119,7 @@ void ClientSession::handle_packet(Packet &packet) {
         }
         case Opcode::CMSG_HELLO: {
             std::string msg = packet.buffer.read_string();
-            std::cout << "[Server] CMSG_HELLO received, msg: " << msg << "\n";
+            log->debug("[client_session] opcode[{}, CMSG_HELLO], Message: {}", static_cast<int>(packet.opcode), msg);
 
             Packet resp;
             resp.opcode = Opcode::SMSG_HELLO_RES;
@@ -124,13 +128,13 @@ void ClientSession::handle_packet(Packet &packet) {
             break;
         }
         case Opcode::CMSG_DATABASE_ASYNC_EXAMPLE: {
-            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
-                      << "] CMSG_DATABASE_ASYNC_EXAMPLE\n";
             uint64_t id = packet.buffer.read_uint64();
+            log->debug("[client_session] opcode[{}, CMSG_DATABASE_ASYNC_EXAMPLE], id: {}", static_cast<int>(packet.opcode), id);
 
             // АСИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
             async_query([self, id]() -> boost::asio::awaitable<void> {
+                auto a_log = Logger::get();
                 try {
 
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
@@ -138,8 +142,7 @@ void ClientSession::handle_packet(Packet &packet) {
 
                     auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
                     if (user) {
-                        std::cout << "[Server][Async] id: " << user->id
-                                  << ", name: " << user->name << "\n";
+                        a_log->debug("[client_session][Async] id: {}, name {}", user->id, user->name);
                     }
 
                     Packet resp;
@@ -155,21 +158,20 @@ void ClientSession::handle_packet(Packet &packet) {
             break;
         }
         case Opcode::CMSG_DATABASE_SYNC_EXAMPLE: {
-            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
-                      << "] CMSG_DATABASE_SYNC_EXAMPLE\n";
             uint64_t id = packet.buffer.read_uint64();
+            log->debug("[client_session] opcode[{}, CMSG_DATABASE_SYNC_EXAMPLE], id: {}", static_cast<int>(packet.opcode), id);
 
             // СИНХРОННЫЙ ЗАПРОС
             auto self = shared_from_this();
             blocking_query([self, id]() {
+                auto a_log = Logger::get();
                 try {
                     PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
                     stmt.set_param(0, id);
 
                     auto user = self->server_->db()->Sync.execute<UserRow>(stmt);
                     if (user) {
-                        std::cout << "[Server][Sync] id: " << user->id
-                                  << ", name: " << user->name << "\n";
+                        a_log->debug("[client_session][Sync] id: {}, name {}", user->id, user->name);
                     }
 
                     Packet resp;
@@ -184,14 +186,14 @@ void ClientSession::handle_packet(Packet &packet) {
             break;
         }
         case Opcode::CMSG_DATABASE_ASYNC_UPDATE: {
-            std::cout << "[Server] " << "opcode[" << static_cast<int>(packet.opcode)
-                      << "] CMSG_DATABASE_ASYNC_UPDATE\n";
             uint64_t id = packet.buffer.read_uint64();
             std::string msg = packet.buffer.read_string();
+            log->debug("[client_session] opcode[{}, CMSG_DATABASE_ASYNC_UPDATE], id: {}, name: {}", static_cast<int>(packet.opcode), id, msg);
 
             // Асинхронный без возврата значений
             auto self = shared_from_this();
             async_query([self, id, msg]() -> boost::asio::awaitable<void> {
+                auto a_log = Logger::get();
                 try {
                     PreparedStatement stmt("UPDATE_SOMETHING");
                     stmt.set_param(0, msg);
@@ -203,7 +205,7 @@ void ClientSession::handle_packet(Packet &packet) {
                     self->send_packet(resp);
 
                 } catch (const std::exception &ex) {
-                    std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
+                    a_log->error("[client_session][Async] DB error: {}", ex.what());
                 }
                 co_return;
             });
@@ -211,7 +213,7 @@ void ClientSession::handle_packet(Packet &packet) {
             break;
         }
         default:
-            std::cout << "[Server] Unknown opcode: " << static_cast<int>(packet.opcode) << "\n";
+            log->warn("[client_session] Unknown opcode: {}", static_cast<int>(packet.opcode));
             break;
     }
 }
@@ -241,11 +243,12 @@ void ClientSession::do_write() {
     auto self = shared_from_this();
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t) {
+                                 auto log = Logger::get();
                                  if (ec) {
                                      if (ec == boost::asio::error::operation_aborted) {
                                          return;
                                      }
-                                     std::cerr << "[Server] Write failed: " << ec.message() << "\n";
+                                     log->error("[client_session] Write failed: {}", ec.message());
                                      close();
                                      return;
                                  }

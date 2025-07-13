@@ -1,5 +1,6 @@
 #include "Server.hpp"
 #include "ClientSession/ClientSession.hpp"
+#include "Logger.hpp"
 #include <iostream>
 
 using boost::asio::ip::tcp;
@@ -12,21 +13,22 @@ Server::Server(boost::asio::any_io_executor executor, std::shared_ptr<Database> 
 void Server::start_accept() {
     acceptor_.async_accept(
             [self = shared_from_this()](boost::system::error_code ec, tcp::socket socket) {
+                auto log = Logger::get();
+
                 if (ec) {
                     if (ec == boost::asio::error::operation_aborted) {
                         // Сервер остановлен — молча выходим
                         return;
                     }
-                    std::cerr << "[Server] Accept failed: " << ec.message() << "\n";
+                    log->error("[Server] Accept failed: {}", ec.message());
                     return;
                 }
 
                 auto session = std::make_shared<ClientSession>(std::move(socket), self);
-
                 {
                     std::lock_guard<std::mutex> lock(self->sessions_mutex_);
                     self->sessions_.insert(session);
-                    std::cout << "[Server] New client connected.\n";
+                    log->info("[Server] New client connected.");
                     self->log_session_count();
                 }
 
@@ -36,12 +38,13 @@ void Server::start_accept() {
 }
 
 void Server::stop() {
+    auto log = Logger::get();
     boost::system::error_code ec;
     acceptor_.close(ec);
     if (ec) {
-        std::cerr << "[Server] Failed to close acceptor: " << ec.message() << "\n";
+        log->error("[Server] Failed to close acceptor: {}", ec.message());
     } else {
-        std::cout << "[Server] Acceptor closed.\n";
+        log->info("[Server] Acceptor closed.");
     }
 
     {
@@ -68,5 +71,6 @@ void Server::remove_session(std::shared_ptr<ClientSession> session) {
 }
 
 void Server::log_session_count() {
-    std::cout << "[Server] Active sessions: " << sessions_.size() << "\n";
+    auto log = Logger::get();
+    log->info("[Server] Active sessions: {}", sessions_.size());
 }
