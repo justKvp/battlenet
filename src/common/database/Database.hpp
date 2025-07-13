@@ -4,6 +4,7 @@
 
 #include "PreparedStatement.hpp"
 #include "QueryResults.hpp"
+#include "Logger.hpp"
 
 #include <pqxx/pqxx>
 #include <boost/asio.hpp>
@@ -25,10 +26,11 @@ public:
     Database(boost::asio::thread_pool &pool, const std::string &conninfo, size_t pool_size = 4)
             : pool_(pool), conninfo_(conninfo)
     {
+        auto log = Logger::get();
         for (size_t i = 0; i < pool_size; ++i) {
             auto conn = std::make_unique<pqxx::connection>(conninfo_);
             prepare_all(*conn);
-            std::cout << "[Database] Connection " << i + 1 << " established.\n";
+            log->info("[Database] Connection {} established", i + 1);
             connections_.push(std::move(conn));
         }
     }
@@ -38,12 +40,13 @@ public:
     }
 
     void shutdown() {
+        auto log = Logger::get();
         std::lock_guard<std::mutex> lock(mutex_);
         while (!connections_.empty()) {
             auto &c = connections_.front();
             if (c && c->is_open()) {
                 c->disconnect();
-                std::cout << "[Database] Connection closed.\n";
+                log->info("[Database] Connection closed.");
             }
             connections_.pop();
         }
@@ -141,7 +144,8 @@ private:
         connections_.pop();
 
         if (!conn->is_open()) {
-            std::cerr << "[Database] Connection was closed. Reconnecting.\n";
+            auto log = Logger::get();
+            log->warn("[Database] Connection was closed. Reconnecting.");
             conn = reconnect_connection();
         }
 
@@ -156,7 +160,8 @@ private:
     std::unique_ptr<pqxx::connection> reconnect_connection() {
         auto conn = std::make_unique<pqxx::connection>(conninfo_);
         prepare_all(*conn);
-        std::cout << "[Database] Connection re-established.\n";
+        auto log = Logger::get();
+        log->info("[Database] Connection re-established.");
         return conn;
     }
 
