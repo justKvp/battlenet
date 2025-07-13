@@ -89,6 +89,28 @@ void Client::send_hello(const std::string &msg, const uint8_t &number, const flo
     send_packet(p);
 }
 
+void Client::send_async_select_user_by_id(const uint64_t &id) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_ASYNC_EXAMPLE;
+    p.buffer.write_uint64(id);
+    send_packet(p);
+}
+
+void Client::send_sync_select_user_by_id(const uint64_t &id) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_SYNC_EXAMPLE;
+    p.buffer.write_uint64(id);
+    send_packet(p);
+}
+
+void Client::send_async_update_user_name_by_id(const uint64_t &id, const std::string &name) {
+    Packet p;
+    p.opcode = Opcode::CMSG_DATABASE_ASYNC_UPDATE;
+    p.buffer.write_uint64(id);
+    p.buffer.write_string(name);
+    send_packet(p);
+}
+
 void Client::send_packet(const Packet& packet) {
     std::vector<uint8_t> body = packet.serialize();
 
@@ -136,7 +158,13 @@ void Client::start_receive_loop() {
     boost::asio::async_read(socket, boost::asio::buffer(*header),
                             [this, header](boost::system::error_code ec, std::size_t) {
                                 if (ec) {
-                                    std::cerr << "[Client] Read header failed: " << ec.message() << "\n";
+                                    if (ec == boost::asio::error::operation_aborted) {
+                                        std::cout << "[Client] Client disconnected\n";
+                                    } else if (ec == boost::asio::error::eof) {
+                                        std::cout << "[Client] Client closed connection normally (EOF)\n";
+                                    } else {
+                                        std::cerr << "[Client] Header read failed: " << ec.message() << "\n";
+                                    }
                                     connected = false;
                                     schedule_reconnect();
                                     return;
@@ -155,7 +183,13 @@ void Client::start_receive_loop() {
                                 boost::asio::async_read(socket, boost::asio::buffer(*body),
                                                         [this, body](boost::system::error_code ec2, std::size_t) {
                                                             if (ec2) {
-                                                                std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
+                                                                if (ec2 == boost::asio::error::operation_aborted) {
+                                                                    std::cout << "[Client] Client disconnected\n";
+                                                                } else if (ec2 == boost::asio::error::eof) {
+                                                                    std::cout << "[Client] Client closed connection normally (EOF)\n";
+                                                                } else {
+                                                                    std::cerr << "[Client] Read body failed: " << ec2.message() << "\n";
+                                                                }
                                                                 connected = false;
                                                                 schedule_reconnect();
                                                                 return;

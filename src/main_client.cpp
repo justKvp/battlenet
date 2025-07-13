@@ -23,8 +23,8 @@ int main() {
     timer1.expires_after(std::chrono::milliseconds(1000));
     timer1.async_wait([&client](const boost::system::error_code& ec) {
         if (!ec) {
-            std::cout << "[Main] Sending first manual packet...\n";
-            client->send_message("First manual message");
+            std::cout << "[Main] Sending 1 manual packet...\n";
+            client->send_async_select_user_by_id(1);
         }
     });
 
@@ -33,8 +33,18 @@ int main() {
     timer2.expires_after(std::chrono::milliseconds(2000));
     timer2.async_wait([&client](const boost::system::error_code& ec) {
         if (!ec) {
-            std::cout << "[Main] Sending second manual packet...\n";
-            client->send_hello("hello", 254, 10.5f);
+            std::cout << "[Main] Sending 2 manual packet...\n";
+            client->send_sync_select_user_by_id(1);
+        }
+    });
+
+    // Второй таймер — отправка второго пакета ещё через 2000мс (общая задержка)
+    boost::asio::steady_timer timer3(io);
+    timer3.expires_after(std::chrono::milliseconds(3000));
+    timer3.async_wait([&client](const boost::system::error_code& ec) {
+        if (!ec) {
+            std::cout << "[Main] Sending 3 manual packet...\n";
+            client->send_async_update_user_name_by_id(1, "ALICE_TEST");
         }
     });
 

@@ -1,33 +1,39 @@
 #include "server/Server.hpp"
+#include "Database.hpp"
 #include <boost/asio.hpp>
 #include <iostream>
+#include <csignal>
 
 int main() {
     try {
         unsigned int network_threads = 4;
-        boost::asio::thread_pool pool(network_threads);
-
         int port = 12345;
 
-        // 1) Создаёшь сервер
-        auto server = std::make_shared<Server>(pool.get_executor(), port);
+        // Единый thread pool на всё приложение
+        boost::asio::thread_pool pool(network_threads);
 
-        // 2) После создания — запускаешь accept
+        // 🟢 Инициализируем базу данных (передаём тот же пул!)
+        auto db = std::make_shared<Database>(pool, "host=185.185.59.232 port=58995 user=postgres password=postgres dbname=postgres", 4);
+
+        // Сервер получает ссылку на pool и готовую БД
+        auto server = std::make_shared<Server>(pool.get_executor(), db, port);
+
         server->start_accept();
 
         std::cout << "[Server] Running on port " << port << "\n";
 
-        // Перехват SIGINT, SIGTERM
+        // Перехват SIGINT/SIGTERM
         boost::asio::signal_set signals(pool.get_executor(), SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int signal_number) {
             std::cout << "[Server] Signal " << signal_number << " received, shutting down...\n";
-            server->stop();   // 🟢 Правильное закрытие!
+            server->stop();
             pool.stop();
         });
 
-        pool.join(); // ждём все worker-потоки
+        // Запускаем все worker-потоки
+        pool.join();
 
-        std::cout << "[Server] Shutting down gracefully.\n";
+        std::cout << "[Server] Gracefully shut down.\n";
 
     } catch (const std::exception& e) {
         std::cerr << "[Server] Exception: " << e.what() << "\n";
