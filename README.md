@@ -1,4 +1,4 @@
-# purity
+# BattleNet - emulator
 
 ## Required
 
