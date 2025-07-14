@@ -73,6 +73,8 @@ public:
     bool isAuthenticated() const { return authenticated_; }
     void setAuthenticated(bool val = true) { authenticated_ = val; }
 
+    bool isOpened() { return closed_; }
+
     SRP* srp() { return srp_.get(); }
 
 private:
