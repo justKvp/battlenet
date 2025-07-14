@@ -21,14 +21,13 @@ void ClientSession::start() {
     p.opcode = SID_AUTH_INFO;
     p.buffer.write_uint32(0x49583836); // IX86
     p.buffer.write_uint32(0x57515233); // W3XP
-    p.buffer.write_uint32(17085);      // Version
+    p.buffer.write_uint32(0x42BD);      // Version
     p.buffer.write_uint32(0);          // exe hash
-    p.buffer.write_uint32(server_token_);
+    p.buffer.write_uint32(0x12345678);
     p.buffer.write_uint32(0);          // client_token
     p.buffer.write_string("PvPGN Banner");
 
     Logger::get()->debug("[start] Buffer size: {}", p.buffer.size());
-    Logger::get()->debug("[Packet::serialize] BNCS len: {}", p.serialize().size());
 
     send_packet(p);
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");

@@ -11,15 +11,18 @@ struct Packet {
     // === Serialize ===
     std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;
-        uint32_t len = 1 + buffer.size();
-        for (int i = 0; i < 4; ++i) {
-            out.push_back(static_cast<uint8_t>((len >> (i * 8)) & 0xFF));
-        }
-        out.push_back(opcode);
+
+        uint32_t len = 1 + buffer.size(); // 1 байт opcode
+        // Little Endian length
+        out.push_back(static_cast<uint8_t>(len & 0xFF));
+        out.push_back(static_cast<uint8_t>((len >> 8) & 0xFF));
+        out.push_back(static_cast<uint8_t>((len >> 16) & 0xFF));
+        out.push_back(static_cast<uint8_t>((len >> 24) & 0xFF));
+
+        out.push_back(opcode); // strict: 1 байт op
         out.insert(out.end(), buffer.data().begin(), buffer.data().end());
 
-        // Можно оставить лог, но аккуратно:
-        // Logger::get()->debug("[Packet::serialize] LEN={} OPCODE={} => SIZE={}", len, opcode, out.size());
+        Logger::get()->debug("[Packet::serialize] LEN={} OPCODE={} => SIZE={}", len, opcode, out.size());
         return out;
     }
 
