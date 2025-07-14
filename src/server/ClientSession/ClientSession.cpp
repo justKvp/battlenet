@@ -80,15 +80,27 @@ void ClientSession::blocking_query(Func &&func) {
 
 void ClientSession::read_header() {
     auto self = shared_from_this();
+
+    // Обнуляем header_buffer_ — очень важно!
+    header_buffer_.fill(0);
+
+    // Читаем ровно 4 байта BNCS header
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t) {
+                            [this, self](boost::system::error_code ec, size_t bytes_transferred) {
                                 auto log = Logger::get();
+
                                 if (ec) {
-                                    if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
-                                        log->info("[client_session] Client disconnected");
+                                    if (ec == boost::asio::error::eof) {
+                                        log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
-                                        log->error("[client_session] Header read failed: {}", ec.message());
+                                        log->error("[client_session] read_header failed: {}", ec.message());
                                     }
+                                    close();
+                                    return;
+                                }
+
+                                if (bytes_transferred != 4) {
+                                    log->error("[client_session] read_header: expected 4 bytes, got {}", bytes_transferred);
                                     close();
                                     return;
                                 }
@@ -103,45 +115,63 @@ void ClientSession::read_header() {
                                            header_buffer_[0], header_buffer_[1],
                                            header_buffer_[2], header_buffer_[3]);
 
+                                if (len == 0) {
+                                    log->error("[client_session] read_header: length is zero!");
+                                    close();
+                                    return;
+                                }
+
+                                body_buffer_.clear();
                                 body_buffer_.resize(len);
+
                                 read_body(len);
-                            });
+                            }
+    );
 }
 
 void ClientSession::read_body(std::size_t size) {
     auto self = shared_from_this();
+
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t) {
+                            [this, self, size](boost::system::error_code ec, size_t bytes_transferred) {
                                 auto log = Logger::get();
+
                                 if (ec) {
-                                    if (ec == boost::asio::error::operation_aborted) {
-                                        log->info("[client_session] Client disconnected");
-                                    } else if (ec == boost::asio::error::eof) {
+                                    if (ec == boost::asio::error::eof) {
                                         log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
-                                        log->error("[client_session] Body read failed: {}", ec.message());
+                                        log->error("[client_session] read_body failed: {}", ec.message());
                                     }
                                     close();
                                     return;
                                 }
 
+                                if (bytes_transferred != size) {
+                                    log->error("[client_session] read_body: expected {} bytes, got {}", size, bytes_transferred);
+                                    close();
+                                    return;
+                                }
+
+                                // Для отладки — полный дамп
+                                std::string hex;
+                                for (uint8_t b : body_buffer_)
+                                    hex += fmt::format("{:02X} ", b);
+                                log->debug("[read_body] RAW: {}", hex);
+
                                 try {
                                     Packet pkt = Packet::deserialize(body_buffer_);
-                                    log->debug("[read_body] deserialized opcode[{}]", static_cast<int>(pkt.opcode));
-
-                                    std::string hex;
-                                    for (uint8_t b : body_buffer_)
-                                        hex += fmt::format("{:02X} ", b);
-                                    log->debug("[read_body] Body raw: {}", hex);
+                                    log->debug("[read_body] OPCODE: {}", static_cast<int>(pkt.opcode));
 
                                     handle_packet(pkt);
-                                    read_header(); // loop
+
+                                    // Продолжить цикл
+                                    read_header();
                                 } catch (const std::exception &ex) {
                                     log->error("[client_session] Packet deserialization failed: {}", ex.what());
-                                    log->error("[client_session] RAW DUMP: {}", fmt::join(body_buffer_, " "));
                                     close();
                                 }
-                            });
+                            }
+    );
 }
 
 void ClientSession::handle_packet(Packet &packet) {
