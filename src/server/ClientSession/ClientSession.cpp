@@ -27,12 +27,10 @@ void ClientSession::start() {
     p.buffer.write_uint32(0);          // client_token
     p.buffer.write_string("PvPGN Banner");
 
-    auto raw = p.serialize();
-    Logger::get()->debug("[DEBUG] Sending SID_AUTH_INFO: {}", fmt::join(raw, " "));
-
+    Logger::get()->debug("[start] Preparing SID_AUTH_INFO opcode={}", p.opcode);
     send_packet(p);
-
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
+
     reset_ping_timer();
     read_header();
 }
@@ -198,6 +196,9 @@ void ClientSession::do_write() {
 
     writing_ = true;
     auto self = shared_from_this();
+
+    // 🟢 Вот дамп — прямо перед write
+    Logger::get()->debug("[do_write] RAW OUT: {}", fmt::join(write_queue_.front(), " "));
 
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t) {
