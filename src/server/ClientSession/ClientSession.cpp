@@ -26,12 +26,13 @@ void ClientSession::start() {
     p.buffer.write_uint32(server_token_);
     p.buffer.write_uint32(0);          // client_token
     p.buffer.write_string("PvPGN Banner");
+
+    auto raw = p.serialize();
+    Logger::get()->debug("[DEBUG] Sending SID_AUTH_INFO: {}", fmt::join(raw, " "));
+
     send_packet(p);
 
-    Logger::get()->debug("[DEBUG] Sent SID_AUTH_INFO RAW: {}", fmt::join(p.serialize(), " "));
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
-
-    last_ping_ = std::chrono::steady_clock::now();
     reset_ping_timer();
     read_header();
 }
