@@ -1,13 +1,15 @@
 #pragma once
 
 #include "Packet.hpp"
-#include "src/server/Server.hpp"
-#include "SRP.hpp"
+#include "ByteBuffer.hpp"
 #include "Logger.hpp"
+#include "SRP.hpp"
+#include "src/server/Server.hpp"
 
 #include <boost/asio.hpp>
 #include <deque>
 #include <memory>
+#include <array>
 #include <chrono>
 
 enum class SessionState {
@@ -29,29 +31,13 @@ public:
     void start();
     void close();
 
-    template<typename Func>
-    void async_query(Func &&func);
-
-    template<typename Func>
-    void blocking_query(Func &&func);
-
     void send_packet(const Packet &packet);
-
-    uint32_t getServerToken() const { return server_token_; }
-    uint32_t getClientToken() const { return client_token_; }
-    void setClientToken(uint32_t token) { client_token_ = token; }
-
-    std::shared_ptr<Server> server() const { return server_; }
-
-    void read_header();
-    void read_body(std::size_t size);
-
-    void handle_packet(Packet &packet);
-
-    void do_write();
 
     void reset_ping_timer();
 
+    std::shared_ptr<Server> server() const { return server_; }
+
+    // === SRP related ===
     void initSRP();
     void loadSRPVerifier(const std::string &salt, const std::string &verifier);
     void generateServerEphemeral();
@@ -72,33 +58,38 @@ public:
 
     bool isAuthenticated() const { return authenticated_; }
     void setAuthenticated(bool val = true) { authenticated_ = val; }
+    uint32_t getServerToken() const { return server_token_; }
+    uint32_t getClientToken() const { return client_token_; }
+    void setClientToken(uint32_t token) { client_token_ = token; }
 
     bool isOpened() { return closed_; }
 
     SRP* srp() { return srp_.get(); }
 
 private:
+    void read_loop();
+    void handle_packet(Packet &packet);
+    void do_write();
+
     boost::asio::ip::tcp::socket socket_;
     std::shared_ptr<Server> server_;
 
-    std::array<uint8_t, 4> header_buffer_;
-    std::vector<uint8_t> body_buffer_;
+    std::deque<std::vector<uint8_t>> write_queue_;
+    bool writing_ = false;
 
-    uint32_t server_token_ = 0;
-    uint32_t client_token_ = 0;
+    std::vector<uint8_t> read_buffer_;
+    std::vector<uint8_t> inbuf_;
+
+    uint32_t server_token_{};
+    uint32_t client_token_{};
+
+    std::unique_ptr<SRP> srp_;
+    std::chrono::steady_clock::time_point last_ping_;
+    boost::asio::steady_timer ping_timer_;
+    std::atomic<bool> closed_{false};
 
     std::string user_name_;
     SessionState state_ = SessionState::CONNECTED;
     bool exist_in_db_ = false;
     bool authenticated_ = false;
-
-    std::unique_ptr<SRP> srp_;
-
-    std::deque<std::vector<uint8_t>> write_queue_;
-    bool writing_ = false;
-
-    boost::asio::steady_timer ping_timer_;
-    std::chrono::steady_clock::time_point last_ping_;
-
-    std::atomic<bool> closed_{false};
 };

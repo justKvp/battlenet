@@ -21,18 +21,20 @@ void ClientSession::start() {
     p.opcode = SID_AUTH_INFO;
     p.buffer.write_uint32(0x49583836); // IX86
     p.buffer.write_uint32(0x57515233); // W3XP
-    p.buffer.write_uint32(17085);      // Warcraft III 1.27.17085
-    p.buffer.write_uint32(0);          // EXE hash
+    p.buffer.write_uint32(17085);      // Version
+    p.buffer.write_uint32(0);          // exe hash
     p.buffer.write_uint32(server_token_);
     p.buffer.write_uint32(0);          // client_token
     p.buffer.write_string("PvPGN Banner");
 
-    Logger::get()->debug("[start] Preparing SID_AUTH_INFO opcode={}", p.opcode);
+    Logger::get()->debug("[start] Buffer size: {}", p.buffer.size());
+    Logger::get()->debug("[Packet::serialize] BNCS len: {}", p.serialize().size());
+
     send_packet(p);
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
 
     reset_ping_timer();
-    read_header();
+    read_loop();
 }
 
 void ClientSession::close() {
@@ -56,121 +58,44 @@ void ClientSession::close() {
     Logger::get()->info("[client_session] Closed");
 }
 
-template<typename Func>
-void ClientSession::async_query(Func &&func) {
+void ClientSession::read_loop() {
     auto self = shared_from_this();
-    boost::asio::co_spawn(
-            socket_.get_executor(),
-            std::forward<Func>(func),
-            boost::asio::detached
-    );
-}
+    read_buffer_.resize(4096);
 
-template<typename Func>
-void ClientSession::blocking_query(Func &&func) {
-    auto self = shared_from_this();
-    boost::asio::post(
-            server_->thread_pool(),
-            [self, func = std::forward<Func>(func)] {
-                func();
-            }
-    );
-}
-
-void ClientSession::read_header() {
-    auto self = shared_from_this();
-
-    // Обнуляем header_buffer_ — очень важно!
-    header_buffer_.fill(0);
-
-    // Читаем ровно 4 байта BNCS header
-    boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
-                            [this, self](boost::system::error_code ec, size_t bytes_transferred) {
+    socket_.async_read_some(boost::asio::buffer(read_buffer_),
+                            [this, self](boost::system::error_code ec, std::size_t bytes_transferred) {
                                 auto log = Logger::get();
-
                                 if (ec) {
                                     if (ec == boost::asio::error::eof) {
-                                        log->info("[client_session] Client closed connection normally (EOF)");
+                                        log->info("[client_session] [read_loop] Client closed connection normally (EOF)");
                                     } else {
-                                        log->error("[client_session] read_header failed: {}", ec.message());
+                                        log->info("[client_session] [read_loop] read_loop closed: {}", ec.message());
                                     }
                                     close();
                                     return;
                                 }
 
-                                if (bytes_transferred != 4) {
-                                    log->error("[client_session] read_header: expected 4 bytes, got {}", bytes_transferred);
-                                    close();
-                                    return;
-                                }
+                                inbuf_.insert(inbuf_.end(), read_buffer_.begin(), read_buffer_.begin() + bytes_transferred);
 
-                                uint32_t len = header_buffer_[0]
-                                               | (header_buffer_[1] << 8)
-                                               | (header_buffer_[2] << 16)
-                                               | (header_buffer_[3] << 24);
+                                while (inbuf_.size() >= 4) {
+                                    uint32_t len =
+                                            (inbuf_[0]) |
+                                            (inbuf_[1] << 8) |
+                                            (inbuf_[2] << 16) |
+                                            (inbuf_[3] << 24);
 
-                                log->debug("[read_header] Parsed BNCS length: {}", len);
-                                log->debug("[read_header] Header raw: {:02X} {:02X} {:02X} {:02X}",
-                                           header_buffer_[0], header_buffer_[1],
-                                           header_buffer_[2], header_buffer_[3]);
+                                    if (inbuf_.size() < 4 + len) break;
 
-                                if (len == 0) {
-                                    log->error("[client_session] read_header: length is zero!");
-                                    close();
-                                    return;
-                                }
+                                    std::vector<uint8_t> packet_data(inbuf_.begin() + 4, inbuf_.begin() + 4 + len);
 
-                                body_buffer_.clear();
-                                body_buffer_.resize(len);
-
-                                read_body(len);
-                            }
-    );
-}
-
-void ClientSession::read_body(std::size_t size) {
-    auto self = shared_from_this();
-
-    boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self, size](boost::system::error_code ec, size_t bytes_transferred) {
-                                auto log = Logger::get();
-
-                                if (ec) {
-                                    if (ec == boost::asio::error::eof) {
-                                        log->info("[client_session] Client closed connection normally (EOF)");
-                                    } else {
-                                        log->error("[client_session] read_body failed: {}", ec.message());
-                                    }
-                                    close();
-                                    return;
-                                }
-
-                                if (bytes_transferred != size) {
-                                    log->error("[client_session] read_body: expected {} bytes, got {}", size, bytes_transferred);
-                                    close();
-                                    return;
-                                }
-
-                                // Для отладки — полный дамп
-                                std::string hex;
-                                for (uint8_t b : body_buffer_)
-                                    hex += fmt::format("{:02X} ", b);
-                                log->debug("[read_body] RAW: {}", hex);
-
-                                try {
-                                    Packet pkt = Packet::deserialize(body_buffer_);
-                                    log->debug("[read_body] OPCODE: {}", static_cast<int>(pkt.opcode));
-
+                                    Packet pkt = Packet::deserialize(packet_data);
                                     handle_packet(pkt);
 
-                                    // Продолжить цикл
-                                    read_header();
-                                } catch (const std::exception &ex) {
-                                    log->error("[client_session] Packet deserialization failed: {}", ex.what());
-                                    close();
+                                    inbuf_.erase(inbuf_.begin(), inbuf_.begin() + 4 + len);
                                 }
-                            }
-    );
+
+                                read_loop();
+                            });
 }
 
 void ClientSession::handle_packet(Packet &packet) {
@@ -178,10 +103,11 @@ void ClientSession::handle_packet(Packet &packet) {
 }
 
 void ClientSession::send_packet(const Packet &packet) {
-    auto serialized = packet.serialize();
+    auto raw = packet.serialize();
+    Logger::get()->debug("[send_packet] RAW: {}", fmt::join(raw, " "));
 
     bool idle = write_queue_.empty();
-    write_queue_.push_back(std::move(serialized));
+    write_queue_.push_back(raw);
 
     if (!writing_ && idle) {
         do_write();
@@ -197,18 +123,15 @@ void ClientSession::do_write() {
     writing_ = true;
     auto self = shared_from_this();
 
-    // 🟢 Вот дамп — прямо перед write
-    Logger::get()->debug("[do_write] RAW OUT: {}", fmt::join(write_queue_.front(), " "));
-
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t) {
-                                 auto log = Logger::get();
                                  if (ec) {
                                      if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
-                                         log->info("[client_session] [do_write] Client disconnected");
+                                         Logger::get()->info("[client_session] [do_write] Client disconnected");
                                      } else {
-                                         log->error("[client_session] [do_write] Write failed: {}", ec.message());
+                                         Logger::get()->error("[client_session] [do_write] failed: {}", ec.message());
                                      }
+
                                      close();
                                      return;
                                  }
