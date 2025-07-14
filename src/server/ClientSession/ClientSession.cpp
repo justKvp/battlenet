@@ -8,8 +8,7 @@ using boost::asio::ip::tcp;
 ClientSession::ClientSession(tcp::socket socket, std::shared_ptr<Server> server)
         : socket_(std::move(socket)),
           server_(std::move(server)),
-          ping_timer_(socket_.get_executor()),
-          writing_(false) {}
+          ping_timer_(socket_.get_executor()) {}
 
 void ClientSession::start() {
     auto ep = socket_.remote_endpoint();

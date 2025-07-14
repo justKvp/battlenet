@@ -20,6 +20,8 @@ enum class SessionState {
     CLOSED
 };
 
+class Server;
+
 class ClientSession : public std::enable_shared_from_this<ClientSession> {
 public:
     ClientSession(boost::asio::ip::tcp::socket socket, std::shared_ptr<Server> server);
