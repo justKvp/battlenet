@@ -17,10 +17,20 @@ void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
             break;
 
         case Opcode::SID_AUTH_CHECK:
+            if (session->state() != SessionState::AUTH_INFO_RECEIVED) {
+                Logger::get()->warn("Unexpected SID_AUTH_CHECK in state {}", static_cast<int>(session->state()));
+                session->close();
+                return;
+            }
             Handlers::handle_auth_check(session, p);
             break;
 
         case Opcode::SID_AUTH_INFO:
+            if (session->state() != SessionState::CONNECTED) {
+                Logger::get()->warn("Unexpected SID_AUTH_INFO in state {}", static_cast<int>(session->state()));
+                session->close();
+                return;
+            }
             boost::asio::co_spawn(
                     session->server()->thread_pool(),
                     handle_auth_info(session, p),
@@ -29,6 +39,11 @@ void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
             break;
 
         case Opcode::SID_LOGON_PROOF:
+            if (session->state() != SessionState::AUTH_CHECK_RECEIVED) {
+                Logger::get()->warn("Unexpected SID_LOGON_PROOF in state {}", static_cast<int>(session->state()));
+                session->close();
+                return;
+            }
             boost::asio::co_spawn(
                     session->server()->thread_pool(),
                     handle_logon_proof(session, p),
@@ -93,6 +108,7 @@ void Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet 
     reply.buffer.write_uint32(exe_hash);
     reply.buffer.write_uint32(0); // key_status OK
     reply.buffer.write_uint32(0); // account_status OK
+    session->set_state(SessionState::AUTH_CHECK_RECEIVED);
     session->send_packet(reply);
 }
 
@@ -134,9 +150,8 @@ boost::asio::awaitable<void> Handlers::handle_auth_info(std::shared_ptr<ClientSe
     reply.opcode = Opcode::SID_LOGON_CHALLENGE;
     reply.buffer.write_string(session->getSRPSalt());
     reply.buffer.write_string(session->getSRPB());
-
+    session->set_state(SessionState::AUTH_INFO_RECEIVED);
     session->send_packet(reply);
-
     co_return;
 }
 
@@ -195,8 +210,8 @@ boost::asio::awaitable<void> Handlers::handle_logon_proof(std::shared_ptr<Client
     Packet reply;
     reply.opcode = Opcode::SID_LOGON_PROOF;
     reply.buffer.write_uint8(static_cast<uint8_t>(AuthProofCode::SUCCESS));
+    session->set_state(SessionState::LOGGED_IN);
     session->send_packet(reply);
-
     co_return;
 }
 

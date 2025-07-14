@@ -14,6 +14,15 @@
 
 class Server;
 
+enum class SessionState {
+    CONNECTED,
+    AUTH_INFO_RECEIVED,
+    AUTH_CHECK_RECEIVED,
+    LOGON_CHALLENGE_SENT,
+    LOGON_PROOF_VERIFIED,
+    LOGGED_IN
+};
+
 class ClientSession : public std::enable_shared_from_this<ClientSession> {
 public:
     ClientSession(boost::asio::ip::tcp::socket socket, std::shared_ptr<Server> server);
@@ -58,6 +67,9 @@ public:
     void setClientToken(uint32_t t) { client_token_ = t; }
     uint32_t getClientToken() const { return client_token_; }
 
+    void set_state(SessionState s) { state_ = s; }
+    SessionState state() const { return state_; }
+
 private:
     void read_header();
     void read_body(std::size_t size);
@@ -83,4 +95,6 @@ private:
     bool is_authenticated_ = false;
     bool is_exist_in_db_ = false;
     std::unique_ptr<SRP> srp_;
+
+    SessionState state_ = SessionState::CONNECTED;
 };
