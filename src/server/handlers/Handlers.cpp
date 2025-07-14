@@ -97,13 +97,13 @@ void Handlers::handle_bncs_ping(std::shared_ptr<ClientSession> session, Packet &
     session->send_packet(reply);
 
     // Отправить SID_AUTH_CHECK
-    Packet auth_check;
-    auth_check.opcode = Opcode::SID_AUTH_CHECK;
-    auth_check.buffer.write_uint32(session->getServerToken());
-    auth_check.buffer.write_uint32(17085);
-    auth_check.buffer.write_uint32(0);
-    auth_check.buffer.write_string("");
-    session->send_packet(auth_check);
+//    Packet auth_check;
+//    auth_check.opcode = Opcode::SID_AUTH_CHECK;
+//    auth_check.buffer.write_uint32(session->getServerToken());
+//    auth_check.buffer.write_uint32(17085);
+//    auth_check.buffer.write_uint32(0);
+//    auth_check.buffer.write_string("");
+//    session->send_packet(auth_check);
 }
 
 void Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet &p) {

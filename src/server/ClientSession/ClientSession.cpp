@@ -28,6 +28,7 @@ void ClientSession::start() {
     p.buffer.write_string("PvPGN Banner");
     send_packet(p);
 
+    Logger::get()->debug("[DEBUG] Sent SID_AUTH_INFO RAW: {}", fmt::join(p.serialize(), " "));
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
 
     last_ping_ = std::chrono::steady_clock::now();
