@@ -12,12 +12,12 @@ void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
         case Opcode::SID_PING:
             handle_ping(session, p);
             break;
+        case Opcode::SID_BNCS_PING:
+            handle_bncs_ping(session, p);
+            break;
 
         case Opcode::SID_AUTH_CHECK:
-            boost::asio::co_spawn(
-                    session->server()->thread_pool(),
-                    Handlers::handle_auth_check(session, p),
-                    boost::asio::detached);
+            Handlers::handle_auth_check(session, p);
             break;
 
         case Opcode::SID_AUTH_INFO:
@@ -62,42 +62,47 @@ void Handlers::handle_ping(std::shared_ptr<ClientSession> session, Packet &p) {
     session->send_packet(reply);
 }
 
-boost::asio::awaitable<void> Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet &p) {
-    auto log = Logger::get();
+void Handlers::handle_bncs_ping(std::shared_ptr<ClientSession> session, Packet &p) {
+    Logger::get()->info("[Handlers] SID_BNCS_PING");
 
+    session->reset_ping_timer();
+
+    Packet reply;
+    reply.opcode = Opcode::SID_BNCS_PING;  // 0xFF
+    // reply.buffer пустой!
+    session->send_packet(reply);
+}
+
+void Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet &p) {
+    auto log = Logger::get();
     log->info("[Handlers] SID_AUTH_CHECK received");
 
-    // Читаем поля в правильном порядке
     uint32_t client_token = p.buffer.read_uint32();
     uint32_t exe_version = p.buffer.read_uint32();
     uint32_t exe_hash = p.buffer.read_uint32();
-    std::string username = p.buffer.read_string();
+    std::string cdkey_owner = p.buffer.read_string();
 
-    log->debug("[Handlers] AUTH_CHECK: client_token={}, exe_version={}, exe_hash={}, username={}",
-               client_token, exe_version, exe_hash, username);
+    session->setClientToken(client_token);
+
+    log->debug("Tokens: server_token={}, client_token={}", session->getServerToken(), client_token);
 
     Packet reply;
     reply.opcode = Opcode::SID_AUTH_CHECK;
-
-// В реале эти токены ты сохраняешь в сессии при AUTH_INFO
-    reply.buffer.write_uint32(client_token);
+    reply.buffer.write_uint32(session->getClientToken());
     reply.buffer.write_uint32(exe_version);
     reply.buffer.write_uint32(exe_hash);
     reply.buffer.write_uint32(0); // key_status OK
     reply.buffer.write_uint32(0); // account_status OK
-
     session->send_packet(reply);
-
-    co_return;
 }
 
 boost::asio::awaitable<void> Handlers::handle_auth_info(std::shared_ptr<ClientSession> session, Packet &p) {
     auto log = Logger::get();
 
     uint32_t client_token = p.buffer.read_uint32();
-    uint32_t exe_version  = p.buffer.read_uint32();
-    uint32_t exe_hash     = p.buffer.read_uint32();
-    std::string origin_username  = p.buffer.read_string();
+    uint32_t exe_version = p.buffer.read_uint32();
+    uint32_t exe_hash = p.buffer.read_uint32();
+    std::string origin_username = p.buffer.read_string();
 
     log->info("[Handlers] SID_AUTH_INFO: user='{}' token={} ver={} hash={}",
               origin_username, client_token, exe_version, exe_hash);

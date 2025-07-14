@@ -35,6 +35,7 @@ enum Opcode : uint8_t {
 
     // === Ping / Keepalive ===
     SID_PING               = 0x25,
+    SID_BNCS_PING          = 0xFF,
     SID_PONG               = 0x26,
 
     // === Friends ===

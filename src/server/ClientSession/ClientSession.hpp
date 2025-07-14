@@ -54,6 +54,10 @@ public:
     bool isOpened() { return closed_; }
     std::shared_ptr<Server> server() const { return server_; }
 
+    uint32_t getServerToken() const { return server_token_; }
+    void setClientToken(uint32_t t) { client_token_ = t; }
+    uint32_t getClientToken() const { return client_token_; }
+
 private:
     void read_header();
     void read_body(std::size_t size);
@@ -74,6 +78,8 @@ private:
     std::chrono::steady_clock::time_point last_ping_;
 
     std::string username_;
+    uint32_t server_token_{0};
+    uint32_t client_token_{0};
     bool is_authenticated_ = false;
     bool is_exist_in_db_ = false;
     std::unique_ptr<SRP> srp_;

@@ -14,12 +14,18 @@ void ClientSession::start() {
     Logger::get()->info("[client_session] New connection from {}:{}",
                         ep.address().to_string(), ep.port());
 
-    // BNCS: SID_AUTH_INFO пример
+    // Генерируем server_token случайно
+    server_token_ = static_cast<uint32_t>(std::rand());
+
     Packet p;
     p.opcode = SID_AUTH_INFO;
     p.buffer.write_uint32(0x49583836); // IX86
-    p.buffer.write_uint32(0x57515233); // WAR3
-    p.buffer.write_uint32(1);
+    p.buffer.write_uint32(0x57515233); // W3XP
+    p.buffer.write_uint32(17085);      // Версия Warcraft III 1.27.17085
+    p.buffer.write_uint32(0);          // EXE hash (можно ноль)
+    p.buffer.write_uint32(server_token_);
+    p.buffer.write_uint32(0);          // client_token (пусть клиент пришлёт свой)
+    p.buffer.write_string("PvPGN Banner");
     send_packet(p);
 
     Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
@@ -77,10 +83,8 @@ void ClientSession::read_header() {
                             [this, self](boost::system::error_code ec, size_t) {
                                 auto log = Logger::get();
                                 if (ec) {
-                                    if (ec == boost::asio::error::operation_aborted) {
+                                    if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
                                         log->info("[client_session] Client disconnected");
-                                    } else if (ec == boost::asio::error::eof) {
-                                        log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
                                         log->error("[client_session] Header read failed {}", ec.message());
                                     }
@@ -88,8 +92,13 @@ void ClientSession::read_header() {
                                     return;
                                 }
 
-                                uint32_t len = header_buffer_[0] | (header_buffer_[1] << 8) | (header_buffer_[2] << 16) | (header_buffer_[3] << 24);
-                                Logger::get()->info("Parsed BNCS length: {}", len);
+                                uint32_t len = header_buffer_[0] | (header_buffer_[1] << 8) |
+                                               (header_buffer_[2] << 16) | (header_buffer_[3] << 24);
+
+                                log->debug("[read_header] Parsed BNCS length: {}", len);
+                                log->debug("[read_header] Header raw: {:02X} {:02X} {:02X} {:02X}",
+                                                    header_buffer_[0], header_buffer_[1],
+                                                    header_buffer_[2], header_buffer_[3]);
 
                                 body_buffer_.resize(len);
                                 read_body(len);
@@ -100,7 +109,7 @@ void ClientSession::read_body(std::size_t size) {
     body_buffer_.resize(size);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self, size](boost::system::error_code ec, size_t bt) {
+                            [this, self](boost::system::error_code ec, size_t) {
                                 auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
@@ -116,16 +125,26 @@ void ClientSession::read_body(std::size_t size) {
 
                                 try {
                                     Packet pkt = Packet::deserialize(body_buffer_);
-                                    Logger::get()->info("Got opcode: {}", pkt.opcode);
+                                    log->debug("[read_body] deserialized opcode[{}]", static_cast<int>(pkt.opcode));
+
+                                    std::string hex;
+                                    for (uint8_t b : body_buffer_)
+                                        hex += fmt::format("{:02X} ", b);
+                                    log->debug("[read_body] Body raw: {}", hex);
+
+                                    // обрабатываем пакет
+                                    handle_packet(pkt);
+                                    // ✅ Верни цикл чтения!
                                     read_header();
+
                                 } catch (const std::exception &ex) {
-                                    log->info("[client_session] Packet deserialization failed {}", ex.what());
+                                    log->error("[client_session] Packet deserialization failed: {}", ex.what());
+                                    close();
                                 }
                             });
 }
 
 void ClientSession::handle_packet(Packet &packet) {
-    Logger::get()->info("[client_session] Dispatch opcode {}", static_cast<int>(packet.opcode));
     Handlers::dispatch(shared_from_this(), packet);
 }
 
@@ -154,9 +173,10 @@ void ClientSession::do_write() {
                                  if (ec) {
                                      if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
                                          log->info("[client_session] [do_write] Client disconnected");
-                                         return;
                                      }
-                                     log->error("[client_session] Write failed: {}", ec.message());
+                                     else {
+                                         log->error("[client_session] [do_write] Write failed: {}", ec.message());
+                                     }
                                      close();
                                      return;
                                  }
@@ -173,9 +193,7 @@ void ClientSession::reset_ping_timer() {
 
     ping_timer_.expires_after(std::chrono::seconds(60));
     ping_timer_.async_wait([this, self](const boost::system::error_code &ec) {
-        if (ec == boost::asio::error::operation_aborted) {
-            return;
-        }
+        if (ec == boost::asio::error::operation_aborted) return;
         if (!ec) {
             Logger::get()->warn("[client_session] Ping timeout!");
             close();
