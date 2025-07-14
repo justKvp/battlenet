@@ -9,6 +9,10 @@ using namespace Handlers;
 
 void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
     switch (p.opcode) {
+        case Opcode::SID_PING:
+            handle_ping(session, p);
+            break;
+
         case Opcode::SID_BNCS_PING:
             if (session->state() != SessionState::CONNECTED) {
                 Logger::get()->warn("Unexpected SID_BNCS_PING in state {}", static_cast<int>(session->state()));
