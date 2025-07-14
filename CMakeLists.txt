@@ -4,6 +4,8 @@ project(BattleNet)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(OpenSSL REQUIRED)
+
 # === Boost ===
 find_package(Boost REQUIRED COMPONENTS system)
 
@@ -29,24 +31,6 @@ set(COMMON_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/src/common/database
 )
 
-# === Клиент ===
-add_executable(client
-        src/main_client.cpp
-        ${CLIENT_SOURCES}
-        ${COMMON_SOURCES}
-)
-
-target_include_directories(client PRIVATE
-        ${COMMON_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}
-        ${Boost_INCLUDE_DIRS}
-)
-
-target_link_libraries(client PRIVATE
-        ${Boost_LIBRARIES}
-        spdlog::spdlog
-)
-
 # === Сервер ===
 add_executable(server
         src/main_server.cpp
@@ -67,4 +51,5 @@ target_link_libraries(server PRIVATE
         ${PostgreSQL_LIBRARIES}
         ${PQXX_LIBRARIES}
         spdlog::spdlog
+        OpenSSL::Crypto
 )

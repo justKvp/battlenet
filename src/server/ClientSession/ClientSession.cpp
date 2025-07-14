@@ -1,33 +1,53 @@
 #include "ClientSession.hpp"
-#include "QueryResults.hpp"
+#include "src/server/handlers/Handlers.hpp"
 #include "Logger.hpp"
-#include <iostream>
 
 using boost::asio::ip::tcp;
 
 ClientSession::ClientSession(tcp::socket socket, std::shared_ptr<Server> server)
-        : socket_(std::move(socket)), server_(std::move(server)) {}
+        : socket_(std::move(socket)),
+          server_(std::move(server)),
+          ping_timer_(socket_.get_executor()) {}
 
 void ClientSession::start() {
+    auto ep = socket_.remote_endpoint();
+    Logger::get()->info("[client_session] New connection from {}:{}",
+                        ep.address().to_string(), ep.port());
+
+    // BNCS: SID_AUTH_INFO пример
+    Packet p;
+    p.opcode = SID_AUTH_INFO;
+    p.buffer.write_uint32(0x49583836); // IX86
+    p.buffer.write_uint32(0x57515233); // WAR3
+    p.buffer.write_uint32(1);
+    send_packet(p);
+
+    Logger::get()->info("[client_session] Sent SID_AUTH_INFO");
+
+    last_ping_ = std::chrono::steady_clock::now();
+    reset_ping_timer();
     read_header();
 }
 
 void ClientSession::close() {
-    if (closed_.exchange(true)) {
-        // Уже закрыто другим потоком/корутиной
-        return;
-    }
+    if (closed_.exchange(true)) return;
+
+    ping_timer_.cancel();
 
     boost::system::error_code ec;
-
     if (socket_.is_open()) {
-        socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        socket_.shutdown(tcp::socket::shutdown_both, ec);
         socket_.close(ec);
     }
+
+    write_queue_.clear();
+    srp_.reset();
 
     if (server_) {
         server_->remove_session(shared_from_this());
     }
+
+    Logger::get()->info("[client_session] Closed");
 }
 
 template<typename Func>
@@ -52,10 +72,9 @@ void ClientSession::blocking_query(Func &&func) {
 }
 
 void ClientSession::read_header() {
-    header_buffer_.resize(2);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t) {
+                            [this, self](boost::system::error_code ec, size_t) {
                                 auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
@@ -68,8 +87,12 @@ void ClientSession::read_header() {
                                     close();
                                     return;
                                 }
-                                uint16_t body_size = (header_buffer_[0] << 8) | header_buffer_[1];
-                                read_body(body_size);
+
+                                uint32_t len = header_buffer_[0] | (header_buffer_[1] << 8) | (header_buffer_[2] << 16) | (header_buffer_[3] << 24);
+                                Logger::get()->info("Parsed BNCS length: {}", len);
+
+                                body_buffer_.resize(len);
+                                read_body(len);
                             });
 }
 
@@ -77,7 +100,7 @@ void ClientSession::read_body(std::size_t size) {
     body_buffer_.resize(size);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self](boost::system::error_code ec, std::size_t) {
+                            [this, self, size](boost::system::error_code ec, size_t bt) {
                                 auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
@@ -92,143 +115,27 @@ void ClientSession::read_body(std::size_t size) {
                                 }
 
                                 try {
-                                    Packet packet = Packet::deserialize(body_buffer_);
-                                    handle_packet(packet);
+                                    Packet pkt = Packet::deserialize(body_buffer_);
+                                    Logger::get()->info("Got opcode: {}", pkt.opcode);
+                                    read_header();
                                 } catch (const std::exception &ex) {
                                     log->info("[client_session] Packet deserialization failed {}", ex.what());
                                 }
-
-                                read_header();  // Ждём следующий пакет
                             });
 }
 
 void ClientSession::handle_packet(Packet &packet) {
-    auto log = Logger::get();
-    switch (packet.opcode) {
-        case Opcode::MESSAGE: {
-            std::string msg = packet.buffer.read_string();
-            log->debug("[client_session] opcode[{}, MESSAGE], Message: {}", static_cast<int>(packet.opcode), msg);
-            break;
-        }
-        case Opcode::CMSG_PING: {
-            log->debug("[client_session] opcode[{}, CMSG_PING]", static_cast<int>(packet.opcode));
-            Packet pong;
-            pong.opcode = Opcode::SMSG_PONG;
-            send_packet(pong);
-            break;
-        }
-        case Opcode::CMSG_HELLO: {
-            std::string msg = packet.buffer.read_string();
-            log->debug("[client_session] opcode[{}, CMSG_HELLO], Message: {}", static_cast<int>(packet.opcode), msg);
-
-            Packet resp;
-            resp.opcode = Opcode::SMSG_HELLO_RES;
-            resp.buffer.write_string("Hello back!");
-            send_packet(resp);
-            break;
-        }
-        case Opcode::CMSG_DATABASE_ASYNC_EXAMPLE: {
-            uint64_t id = packet.buffer.read_uint64();
-            log->debug("[client_session] opcode[{}, CMSG_DATABASE_ASYNC_EXAMPLE], id: {}", static_cast<int>(packet.opcode), id);
-
-            // АСИНХРОННЫЙ ЗАПРОС
-            auto self = shared_from_this();
-            async_query([self, id]() -> boost::asio::awaitable<void> {
-                auto a_log = Logger::get();
-                try {
-
-                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
-                    stmt.set_param(0, id);
-
-                    auto user = co_await self->server_->db()->Async.execute<UserRow>(stmt);
-                    if (user) {
-                        a_log->debug("[client_session][Async] id: {}, name {}", user->id, user->name);
-                    }
-
-                    Packet resp;
-                    resp.opcode = Opcode::SMSG_DATABASE_ASYNC_EXAMPLE;
-                    self->send_packet(resp);
-
-                } catch (const std::exception &ex) {
-                    std::cerr << "[Server] Async DB error: " << ex.what() << "\n";
-                }
-                co_return;
-            });
-
-            break;
-        }
-        case Opcode::CMSG_DATABASE_SYNC_EXAMPLE: {
-            uint64_t id = packet.buffer.read_uint64();
-            log->debug("[client_session] opcode[{}, CMSG_DATABASE_SYNC_EXAMPLE], id: {}", static_cast<int>(packet.opcode), id);
-
-            // СИНХРОННЫЙ ЗАПРОС
-            auto self = shared_from_this();
-            blocking_query([self, id]() {
-                auto a_log = Logger::get();
-                try {
-                    PreparedStatement stmt("LOGIN_SEL_ACCOUNT_BY_ID");
-                    stmt.set_param(0, id);
-
-                    auto user = self->server_->db()->Sync.execute<UserRow>(stmt);
-                    if (user) {
-                        a_log->debug("[client_session][Sync] id: {}, name {}", user->id, user->name);
-                    }
-
-                    Packet resp;
-                    resp.opcode = Opcode::SMSG_DATABASE_SYNC_EXAMPLE;
-                    self->send_packet(resp);
-
-                } catch (const std::exception &ex) {
-                    std::cerr << "[Server] Sync DB error: " << ex.what() << "\n";
-                }
-            });
-
-            break;
-        }
-        case Opcode::CMSG_DATABASE_ASYNC_UPDATE: {
-            uint64_t id = packet.buffer.read_uint64();
-            std::string msg = packet.buffer.read_string();
-            log->debug("[client_session] opcode[{}, CMSG_DATABASE_ASYNC_UPDATE], id: {}, name: {}", static_cast<int>(packet.opcode), id, msg);
-
-            // Асинхронный без возврата значений
-            auto self = shared_from_this();
-            async_query([self, id, msg]() -> boost::asio::awaitable<void> {
-                auto a_log = Logger::get();
-                try {
-                    PreparedStatement stmt("UPDATE_SOMETHING");
-                    stmt.set_param(0, msg);
-                    stmt.set_param(1, id);
-                    co_await self->server_->db()->Async.execute<NothingRow>(stmt);
-
-                    Packet resp;
-                    resp.opcode = Opcode::SMSG_DATABASE_ASYNC_UPDATE;
-                    self->send_packet(resp);
-
-                } catch (const std::exception &ex) {
-                    a_log->error("[client_session][Async] DB error: {}", ex.what());
-                }
-                co_return;
-            });
-
-            break;
-        }
-        default:
-            log->warn("[client_session] Unknown opcode: {}", static_cast<int>(packet.opcode));
-            break;
-    }
+    Logger::get()->info("[client_session] Dispatch opcode {}", static_cast<int>(packet.opcode));
+    Handlers::dispatch(shared_from_this(), packet);
 }
 
 void ClientSession::send_packet(const Packet &packet) {
-    std::vector<uint8_t> body = packet.serialize();
+    std::vector<uint8_t> out = packet.serialize();
 
-    ByteBuffer header;
-    header.write_uint16(static_cast<uint16_t>(body.size()));
+    bool idle = write_queue_.empty();
+    write_queue_.push_back(std::move(out));
 
-    std::vector<uint8_t> full_packet = header.data();
-    full_packet.insert(full_packet.end(), body.begin(), body.end());
-
-    write_queue_.push_back(std::move(full_packet));
-    if (!writing_) {
+    if (!writing_ && idle) {
         do_write();
     }
 }
@@ -245,15 +152,72 @@ void ClientSession::do_write() {
                              [this, self](boost::system::error_code ec, std::size_t) {
                                  auto log = Logger::get();
                                  if (ec) {
-                                     if (ec == boost::asio::error::operation_aborted) {
+                                     if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
+                                         log->info("[client_session] [do_write] Client disconnected");
                                          return;
                                      }
                                      log->error("[client_session] Write failed: {}", ec.message());
                                      close();
                                      return;
                                  }
+
                                  write_queue_.pop_front();
                                  do_write();
                              });
 }
 
+void ClientSession::reset_ping_timer() {
+    auto self = shared_from_this();
+
+    last_ping_ = std::chrono::steady_clock::now();
+
+    ping_timer_.expires_after(std::chrono::seconds(60));
+    ping_timer_.async_wait([this, self](const boost::system::error_code &ec) {
+        if (ec == boost::asio::error::operation_aborted) {
+            return;
+        }
+        if (!ec) {
+            Logger::get()->warn("[client_session] Ping timeout!");
+            close();
+        }
+    });
+}
+
+void ClientSession::initSRP() {
+    if (!srp_) srp_ = std::make_unique<SRP>();
+}
+
+void ClientSession::loadSRPVerifier(const std::string &salt, const std::string &verifier) {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    srp_->load_verifier(salt, verifier);
+}
+
+void ClientSession::generateServerEphemeral() {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    srp_->generate_server_ephemeral();
+}
+
+void ClientSession::processClientPublic(const std::string &A_hex) {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    srp_->process_client_public(A_hex);
+}
+
+bool ClientSession::verifySRPProof(const std::string &M1_hex) {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    return srp_->verify_proof(M1_hex);
+}
+
+std::string ClientSession::getSRPSalt() const {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    return srp_->get_salt();
+}
+
+std::string ClientSession::getSRPB() const {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    return srp_->get_B();
+}
+
+void ClientSession::generateFakeSRPChallenge() {
+    if (!srp_) throw std::runtime_error("SRP not initialized");
+    srp_->generate_fake_challenge();
+}

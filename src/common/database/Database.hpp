@@ -167,10 +167,11 @@ private:
 
     void prepare_all(pqxx::connection &conn) {
         pqxx::work txn(conn);
-        conn.prepare("LOGIN_SEL_ACCOUNT_BY_ID",
-                     "SELECT id, name FROM users WHERE id = $1");
-        conn.prepare("UPDATE_SOMETHING",
-                     "UPDATE users SET name = $1 WHERE id = $2");
+        conn.prepare("SELECT_ACCOUNT_BY_USERNAME",
+                     "SELECT id, username, salt, verifier, email, created_at FROM accounts WHERE username = $1");
+        conn.prepare("INSERT_ACCOUNT_BY_USERNAME",
+                    "INSERT INTO accounts (username, salt, verifier) VALUES ($1, $2, $3) RETURNING id"
+        );
         txn.commit();
     }
 
