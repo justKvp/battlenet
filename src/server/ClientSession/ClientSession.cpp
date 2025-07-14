@@ -8,24 +8,24 @@ using boost::asio::ip::tcp;
 ClientSession::ClientSession(tcp::socket socket, std::shared_ptr<Server> server)
         : socket_(std::move(socket)),
           server_(std::move(server)),
-          ping_timer_(socket_.get_executor()) {}
+          ping_timer_(socket_.get_executor()),
+          writing_(false) {}
 
 void ClientSession::start() {
     auto ep = socket_.remote_endpoint();
     Logger::get()->info("[client_session] New connection from {}:{}",
                         ep.address().to_string(), ep.port());
 
-    // Генерируем server_token случайно
     server_token_ = static_cast<uint32_t>(std::rand());
 
     Packet p;
     p.opcode = SID_AUTH_INFO;
     p.buffer.write_uint32(0x49583836); // IX86
     p.buffer.write_uint32(0x57515233); // W3XP
-    p.buffer.write_uint32(17085);      // Версия Warcraft III 1.27.17085
-    p.buffer.write_uint32(0);          // EXE hash (можно ноль)
+    p.buffer.write_uint32(17085);      // Warcraft III 1.27.17085
+    p.buffer.write_uint32(0);          // EXE hash
     p.buffer.write_uint32(server_token_);
-    p.buffer.write_uint32(0);          // client_token (пусть клиент пришлёт свой)
+    p.buffer.write_uint32(0);          // client_token
     p.buffer.write_string("PvPGN Banner");
     send_packet(p);
 
@@ -81,25 +81,27 @@ void ClientSession::blocking_query(Func &&func) {
 void ClientSession::read_header() {
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(header_buffer_),
-                            [this, self](boost::system::error_code ec, size_t) {
+                            [this, self](boost::system::error_code ec, std::size_t) {
                                 auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
                                         log->info("[client_session] Client disconnected");
                                     } else {
-                                        log->error("[client_session] Header read failed {}", ec.message());
+                                        log->error("[client_session] Header read failed: {}", ec.message());
                                     }
                                     close();
                                     return;
                                 }
 
-                                uint32_t len = header_buffer_[0] | (header_buffer_[1] << 8) |
-                                               (header_buffer_[2] << 16) | (header_buffer_[3] << 24);
+                                uint32_t len = header_buffer_[0]
+                                               | (header_buffer_[1] << 8)
+                                               | (header_buffer_[2] << 16)
+                                               | (header_buffer_[3] << 24);
 
                                 log->debug("[read_header] Parsed BNCS length: {}", len);
                                 log->debug("[read_header] Header raw: {:02X} {:02X} {:02X} {:02X}",
-                                                    header_buffer_[0], header_buffer_[1],
-                                                    header_buffer_[2], header_buffer_[3]);
+                                           header_buffer_[0], header_buffer_[1],
+                                           header_buffer_[2], header_buffer_[3]);
 
                                 body_buffer_.resize(len);
                                 read_body(len);
@@ -107,10 +109,9 @@ void ClientSession::read_header() {
 }
 
 void ClientSession::read_body(std::size_t size) {
-    body_buffer_.resize(size);
     auto self = shared_from_this();
     boost::asio::async_read(socket_, boost::asio::buffer(body_buffer_),
-                            [this, self](boost::system::error_code ec, size_t) {
+                            [this, self](boost::system::error_code ec, std::size_t) {
                                 auto log = Logger::get();
                                 if (ec) {
                                     if (ec == boost::asio::error::operation_aborted) {
@@ -118,7 +119,7 @@ void ClientSession::read_body(std::size_t size) {
                                     } else if (ec == boost::asio::error::eof) {
                                         log->info("[client_session] Client closed connection normally (EOF)");
                                     } else {
-                                        log->error("[client_session] Body read failed {}", ec.message());
+                                        log->error("[client_session] Body read failed: {}", ec.message());
                                     }
                                     close();
                                     return;
@@ -133,11 +134,8 @@ void ClientSession::read_body(std::size_t size) {
                                         hex += fmt::format("{:02X} ", b);
                                     log->debug("[read_body] Body raw: {}", hex);
 
-                                    // обрабатываем пакет
                                     handle_packet(pkt);
-                                    // ✅ Верни цикл чтения!
-                                    read_header();
-
+                                    read_header(); // loop
                                 } catch (const std::exception &ex) {
                                     log->error("[client_session] Packet deserialization failed: {}", ex.what());
                                     log->error("[client_session] RAW DUMP: {}", fmt::join(body_buffer_, " "));
@@ -151,10 +149,10 @@ void ClientSession::handle_packet(Packet &packet) {
 }
 
 void ClientSession::send_packet(const Packet &packet) {
-    std::vector<uint8_t> out = packet.serialize();
+    auto serialized = packet.serialize();
 
     bool idle = write_queue_.empty();
-    write_queue_.push_back(std::move(out));
+    write_queue_.push_back(std::move(serialized));
 
     if (!writing_ && idle) {
         do_write();
@@ -169,14 +167,14 @@ void ClientSession::do_write() {
 
     writing_ = true;
     auto self = shared_from_this();
+
     boost::asio::async_write(socket_, boost::asio::buffer(write_queue_.front()),
                              [this, self](boost::system::error_code ec, std::size_t) {
                                  auto log = Logger::get();
                                  if (ec) {
                                      if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::eof) {
                                          log->info("[client_session] [do_write] Client disconnected");
-                                     }
-                                     else {
+                                     } else {
                                          log->error("[client_session] [do_write] Write failed: {}", ec.message());
                                      }
                                      close();
@@ -190,7 +188,6 @@ void ClientSession::do_write() {
 
 void ClientSession::reset_ping_timer() {
     auto self = shared_from_this();
-
     last_ping_ = std::chrono::steady_clock::now();
 
     ping_timer_.expires_after(std::chrono::seconds(60));

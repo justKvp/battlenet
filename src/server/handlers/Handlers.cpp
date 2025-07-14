@@ -9,24 +9,28 @@ using namespace Handlers;
 
 void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
     switch (p.opcode) {
-        case Opcode::SID_PING:
-            handle_ping(session, p);
-            break;
         case Opcode::SID_BNCS_PING:
+            if (session->state() != SessionState::CONNECTED) {
+                Logger::get()->warn("Unexpected SID_BNCS_PING in state {}", static_cast<int>(session->state()));
+                session->close();
+                return;
+            }
+            session->set_state(SessionState::BNCS_PING);
             handle_bncs_ping(session, p);
             break;
 
         case Opcode::SID_AUTH_CHECK:
-            if (session->state() != SessionState::AUTH_INFO_RECEIVED) {
+            if (session->state() != SessionState::AUTH_CHECK_SENT) {
                 Logger::get()->warn("Unexpected SID_AUTH_CHECK in state {}", static_cast<int>(session->state()));
                 session->close();
                 return;
             }
             Handlers::handle_auth_check(session, p);
+            session->set_state(SessionState::AUTH_CHECK_RECEIVED);
             break;
 
         case Opcode::SID_AUTH_INFO:
-            if (session->state() != SessionState::CONNECTED) {
+            if (session->state() != SessionState::AUTH_CHECK_RECEIVED) {
                 Logger::get()->warn("Unexpected SID_AUTH_INFO in state {}", static_cast<int>(session->state()));
                 session->close();
                 return;
@@ -39,7 +43,7 @@ void Handlers::dispatch(std::shared_ptr<ClientSession> session, Packet &p) {
             break;
 
         case Opcode::SID_LOGON_PROOF:
-            if (session->state() != SessionState::AUTH_CHECK_RECEIVED) {
+            if (session->state() != SessionState::AUTH_INFO_RECEIVED) {
                 Logger::get()->warn("Unexpected SID_LOGON_PROOF in state {}", static_cast<int>(session->state()));
                 session->close();
                 return;
@@ -82,10 +86,20 @@ void Handlers::handle_bncs_ping(std::shared_ptr<ClientSession> session, Packet &
 
     session->reset_ping_timer();
 
+    // Ответить PING
     Packet reply;
-    reply.opcode = Opcode::SID_BNCS_PING;  // 0xFF
-    // reply.buffer пустой!
+    reply.opcode = Opcode::SID_BNCS_PING;
+    session->set_state(SessionState::AUTH_CHECK_SENT);
     session->send_packet(reply);
+
+    // Отправить SID_AUTH_CHECK
+    Packet auth_check;
+    auth_check.opcode = Opcode::SID_AUTH_CHECK;
+    auth_check.buffer.write_uint32(session->getServerToken());
+    auth_check.buffer.write_uint32(17085);
+    auth_check.buffer.write_uint32(0);
+    auth_check.buffer.write_string("");
+    session->send_packet(auth_check);
 }
 
 void Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet &p) {
@@ -103,7 +117,7 @@ void Handlers::handle_auth_check(std::shared_ptr<ClientSession> session, Packet 
 
     Packet reply;
     reply.opcode = Opcode::SID_AUTH_CHECK;
-    reply.buffer.write_uint32(session->getClientToken());
+    reply.buffer.write_uint32(client_token);
     reply.buffer.write_uint32(exe_version);
     reply.buffer.write_uint32(exe_hash);
     reply.buffer.write_uint32(0); // key_status OK
