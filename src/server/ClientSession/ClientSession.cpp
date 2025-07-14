@@ -1,6 +1,7 @@
 #include "ClientSession.hpp"
 #include "src/server/handlers/Handlers.hpp"
 #include "Logger.hpp"
+#include "spdlog/fmt/ranges.h"
 
 using boost::asio::ip::tcp;
 
@@ -139,6 +140,7 @@ void ClientSession::read_body(std::size_t size) {
 
                                 } catch (const std::exception &ex) {
                                     log->error("[client_session] Packet deserialization failed: {}", ex.what());
+                                    log->error("[client_session] RAW DUMP: {}", fmt::join(body_buffer_, " "));
                                     close();
                                 }
                             });

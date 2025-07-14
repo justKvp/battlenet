@@ -2,6 +2,7 @@
 
 #include "ByteBuffer.hpp"
 #include "opcodes.hpp"
+#include "Logger.hpp"
 
 struct Packet {
     uint8_t opcode;
@@ -20,12 +21,29 @@ struct Packet {
         return out;
     }
 
-    static Packet deserialize(const std::vector<uint8_t>& data) {
-        if (data.size() < 1)
-            throw std::runtime_error("No opcode in body");
-        Packet p;
-        p.opcode = data[0];
-        p.buffer.append(data.data() + 1, data.size() - 1);
-        return p;
+    static Packet deserialize(const std::vector<uint8_t>& raw) {
+        if (raw.empty()) {
+            throw std::runtime_error("Empty packet in deserialize()");
+        }
+
+        Packet pkt;
+
+        pkt.opcode = raw[0];
+
+        if (raw.size() > 1) {
+            pkt.buffer.append(raw.data() + 1, raw.size() - 1);
+        }
+
+        // 🔍 HEX FULL
+        std::ostringstream oss;
+        for (size_t i = 0; i < raw.size(); ++i) {
+            oss << fmt::format("{:02X} ", raw[i]);
+        }
+
+        Logger::get()->debug("[Packet::deserialize] RAW FULL: {}", oss.str());
+        Logger::get()->debug("[Packet::deserialize] OPCODE: {}", static_cast<int>(pkt.opcode));
+        Logger::get()->debug("[Packet::deserialize] PAYLOAD LEN: {}", raw.size() - 1);
+
+        return pkt;
     }
 };
